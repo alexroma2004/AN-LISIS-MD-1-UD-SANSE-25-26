@@ -798,19 +798,39 @@ def plot_team_objective_bar(team_df):
 
 def plot_team_score_trend(df):
     temp = df.groupby("Fecha").agg(
-        objective_loss_score=("objective_loss_score","mean"),
-        readiness_score=("readiness_score","mean"),
-        objective_z_score=("objective_z_score","mean")
+        objective_loss_score=("objective_loss_score", "mean"),
+        readiness_score=("readiness_score", "mean"),
+        objective_z_score=("objective_z_score", "mean"),
     ).reset_index().sort_values("Fecha")
+
     fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Scatter(x=temp["Fecha"], y=temp["objective_loss_score"], mode="lines+markers", name="Loss equipo"), secondary_y=False)
-        fig.add_trace(go.Scatter(x=temp["Fecha"], y=temp["readiness_score"], mode="lines+markers", name="Readiness equipo"), secondary_y=True)
-    fig.update_layout(
-        title="Evolución global del grupo", height=340,
-        margin=dict(l=30,r=30,t=70,b=40), title_x=0.5,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0)
+    fig.add_trace(
+        go.Scatter(
+            x=temp["Fecha"],
+            y=temp["objective_loss_score"],
+            mode="lines+markers",
+            name="Loss equipo",
+        ),
+        secondary_y=False,
     )
-    fig.update_yaxes(title_text="Loss / Z", secondary_y=False, automargin=True)
+    fig.add_trace(
+        go.Scatter(
+            x=temp["Fecha"],
+            y=temp["readiness_score"],
+            mode="lines+markers",
+            name="Readiness equipo",
+        ),
+        secondary_y=True,
+    )
+
+    fig.update_layout(
+        title="Evolución global del grupo",
+        height=340,
+        margin=dict(l=30, r=30, t=70, b=40),
+        title_x=0.5,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
+    fig.update_yaxes(title_text="Loss", secondary_y=False, automargin=True)
     fig.update_yaxes(title_text="Readiness", secondary_y=True, automargin=True)
     return fig
 
