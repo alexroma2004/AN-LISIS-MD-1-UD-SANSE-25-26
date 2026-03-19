@@ -227,7 +227,7 @@ def read_uploaded(uploaded_file):
         return pd.read_excel(uploaded_file, header=None)
     raise ValueError("Formato no soportado. Usa .csv, .xlsx o .xls")
 
-def parse_tidy(df_raw):
+def parse_tidy(df_raw, forced_date=None):
     df = df_raw.copy()
     tmp_cols = [str(c).strip().lower() for c in df.columns]
     first_row = [str(v).strip().lower() if pd.notna(v) else "" for v in df.iloc[0].tolist()] if len(df) else []
@@ -251,17 +251,27 @@ def parse_tidy(df_raw):
         elif "obs" in low: rename[c] = "Observaciones"
     df = df.rename(columns=rename)
 
-    needed = ["Fecha","Jugador","CMJ","RSI_mod","VMP"]
+    needed = ["Jugador","CMJ","RSI_mod","VMP"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
         raise ValueError(f"Faltan columnas: {missing}")
+
+    if "Fecha" not in df.columns:
+        if forced_date is None:
+            raise ValueError("Falta la columna 'Fecha'. Selecciona una fecha antes de subir el archivo.")
+        df["Fecha"] = pd.to_datetime(forced_date)
 
     for optional in ["Posicion","Minutos","Observaciones","sRPE"]:
         if optional not in df.columns:
             df[optional] = np.nan
 
     df = df[["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"]].copy()
-    df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")
+
+    if forced_date is not None:
+        df["Fecha"] = pd.to_datetime(forced_date)
+    else:
+        df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")
+
     df["Jugador"] = df["Jugador"].apply(std_name)
     for c in ["Minutos", *ALL_METRICS]:
         df[c] = df[c].apply(safe_num)
@@ -361,14 +371,22 @@ def parse_block(df_raw):
         raise ValueError("No se pudieron interpretar los bloques del archivo.")
     return out.drop_duplicates(subset=["Fecha","Jugador"], keep="last")
 
-def parse_uploaded(uploaded_file):
+def parse_uploaded(uploaded_file, forced_date=None):
     df_raw = read_uploaded(uploaded_file)
     fmt = detect_format(df_raw)
     if fmt == "tidy":
-        return parse_tidy(df_raw)
-    if fmt == "block":
-        return parse_block(df_raw)
-    raise ValueError("No se pudo detectar el formato del archivo.")
+        parsed = parse_tidy(df_raw, forced_date=forced_date)
+    elif fmt == "block":
+        parsed = parse_block(df_raw)
+        if forced_date is not None:
+            parsed["Fecha"] = pd.to_datetime(forced_date)
+    else:
+        raise ValueError("No se pudo detectar el formato del archivo.")
+
+    if forced_date is not None:
+        parsed["Fecha"] = pd.to_datetime(forced_date)
+
+    return parsed
 
 # =========================================================
 # METRICS / DIAGNOSTIC
