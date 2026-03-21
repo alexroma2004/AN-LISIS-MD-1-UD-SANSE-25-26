@@ -87,25 +87,23 @@ def get_supabase() -> Client:
     )
 
 def init_db():
-    # Supabase gestiona la persistencia de los datos.
+    # Supabase gestiona la persistencia; no se crea DB local.
     pass
 
 def load_monitoring():
-    supabase = get_supabase()
-    res = supabase.table("monitoring").select("*").execute()
-    data = res.data if getattr(res, "data", None) else []
+    try:
+        supabase = get_supabase()
+        res = supabase.table("monitoring").select("*").execute()
+        data = res.data if getattr(res, "data", None) else []
+    except Exception as e:
+        st.error(f"Error al leer desde Supabase: {e}")
+        return pd.DataFrame(columns=["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
 
     if not data:
-        return pd.DataFrame(columns=[
-            "Fecha","Jugador","Posicion","Minutos",
-            "CMJ","RSI_mod","VMP","sRPE","Observaciones"
-        ])
+        return pd.DataFrame(columns=["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
 
     df = pd.DataFrame(data)
-    keep_cols = [c for c in [
-        "Fecha","Jugador","Posicion","Minutos",
-        "CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"
-    ] if c in df.columns]
+    keep_cols = [c for c in ["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
     df = df[keep_cols].copy()
 
     if "Fecha" in df.columns:
@@ -121,11 +119,9 @@ def load_monitoring():
 def upsert_monitoring(df):
     if df.empty:
         return
-
     supabase = get_supabase()
     now = pd.Timestamp.now().isoformat(timespec="seconds")
     rows = []
-
     for _, r in df.iterrows():
         rows.append({
             "Fecha": str(pd.to_datetime(r["Fecha"]).date()),
@@ -139,11 +135,7 @@ def upsert_monitoring(df):
             "Observaciones": None if pd.isna(r.get("Observaciones")) else str(r.get("Observaciones")),
             "updated_at": now,
         })
-
-    supabase.table("monitoring").upsert(
-        rows,
-        on_conflict="Fecha,Jugador"
-    ).execute()
+    supabase.table("monitoring").upsert(rows, on_conflict="Fecha,Jugador").execute()
 
 def delete_session_by_date(date_str):
     supabase = get_supabase()
@@ -377,10 +369,8 @@ def parse_uploaded(uploaded_file, forced_date=None):
             parsed["Fecha"] = pd.to_datetime(forced_date)
     else:
         raise ValueError("No se pudo detectar el formato del archivo.")
-
     if forced_date is not None:
         parsed["Fecha"] = pd.to_datetime(forced_date)
-
     return parsed
 
 # =========================================================
@@ -1148,16 +1138,27 @@ def build_pdf_bytes_team_session(team_day, selected_date):
 # =========================================================
 def page_cargar():
     st.markdown("### Cargar archivo semanal")
+    fecha_sesion = st.date_input(
+        "Selecciona la fecha a la que corresponde el archivo",
+        value=pd.Timestamp.today().date(),
+        format="DD/MM/YYYY"
+    )
     uploaded = st.file_uploader("Sube tu Excel/CSV semanal", type=["xlsx","xls","csv"])
     if uploaded is not None:
         try:
-            parsed = parse_uploaded(uploaded)
-            st.success(f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · {parsed['Fecha'].nunique()} fecha(s)")
+            parsed = parse_uploaded(uploaded, forced_date=fecha_sesion)
+            st.success(
+                f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · "
+                f"fecha asignada: {pd.to_datetime(fecha_sesion).strftime('%Y-%m-%d')}"
+            )
             st.dataframe(parsed, use_container_width=True, hide_index=True)
             if st.button("Guardar en base de datos", type="primary"):
-                upsert_monitoring(parsed)
-                st.success("Datos guardados correctamente.")
-                st.rerun()
+                try:
+                    upsert_monitoring(parsed)
+                    st.success("Datos guardados correctamente.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar en Supabase: {e}")
         except Exception as e:
             st.error(f"No se pudo interpretar el archivo: {e}")
 
