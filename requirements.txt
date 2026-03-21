@@ -5,3 +5,4 @@ plotly
 openpyxl
 reportlab
 kaleido
+supabase
