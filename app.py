@@ -1,8 +1,8 @@
 
 import io
 import re
-import sqlite3
 from pathlib import Path
+from supabase import create_client, Client
 
 import numpy as np
 import pandas as pd
@@ -23,7 +23,6 @@ st.set_page_config(page_title="MD-1 Staff Elite Definitiva", layout="wide", init
 
 APP_DIR = Path("app_data")
 APP_DIR.mkdir(exist_ok=True)
-DB_PATH = APP_DIR / "md1_staff_elite_definitiva_v2.db"
 
 OBJECTIVE_METRICS = ["CMJ", "RSI_mod", "VMP"]
 ALL_METRICS = ["CMJ", "RSI_mod", "VMP", "sRPE"]
@@ -80,79 +79,75 @@ st.markdown("""
 # =========================================================
 # DB
 # =========================================================
-def get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+@st.cache_resource
+def get_supabase() -> Client:
+    return create_client(
+        st.secrets["SUPABASE_URL"],
+        st.secrets["SUPABASE_KEY"]
+    )
 
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS monitoring (
-            Fecha TEXT NOT NULL,
-            Jugador TEXT NOT NULL,
-            Posicion TEXT,
-            Minutos REAL,
-            CMJ REAL,
-            RSI_mod REAL,
-            VMP REAL,
-            sRPE REAL,
-            Observaciones TEXT,
-            updated_at TEXT,
-            PRIMARY KEY (Fecha, Jugador)
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # Supabase gestiona la persistencia de los datos.
+    pass
 
 def load_monitoring():
-    conn = get_conn()
-    df = pd.read_sql("SELECT * FROM monitoring", conn)
-    conn.close()
-    if df.empty:
-        return pd.DataFrame(columns=["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    supabase = get_supabase()
+    res = supabase.table("monitoring").select("*").execute()
+    data = res.data if getattr(res, "data", None) else []
+
+    if not data:
+        return pd.DataFrame(columns=[
+            "Fecha","Jugador","Posicion","Minutos",
+            "CMJ","RSI_mod","VMP","sRPE","Observaciones"
+        ])
+
+    df = pd.DataFrame(data)
+    keep_cols = [c for c in [
+        "Fecha","Jugador","Posicion","Minutos",
+        "CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"
+    ] if c in df.columns]
+    df = df[keep_cols].copy()
+
+    if "Fecha" in df.columns:
+        df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
     for c in ["Minutos", *ALL_METRICS]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
-    df["Jugador"] = df["Jugador"].astype(str).str.strip()
+    if "Jugador" in df.columns:
+        df["Jugador"] = df["Jugador"].astype(str).str.strip()
+
     return df.sort_values(["Jugador","Fecha"]).reset_index(drop=True)
 
 def upsert_monitoring(df):
     if df.empty:
         return
+
+    supabase = get_supabase()
     now = pd.Timestamp.now().isoformat(timespec="seconds")
     rows = []
+
     for _, r in df.iterrows():
-        rows.append((
-            str(pd.to_datetime(r["Fecha"]).date()),
-            str(r["Jugador"]),
-            None if pd.isna(r.get("Posicion")) else str(r.get("Posicion")),
-            None if pd.isna(r.get("Minutos")) else float(r.get("Minutos")),
-            None if pd.isna(r.get("CMJ")) else float(r.get("CMJ")),
-            None if pd.isna(r.get("RSI_mod")) else float(r.get("RSI_mod")),
-            None if pd.isna(r.get("VMP")) else float(r.get("VMP")),
-            None if pd.isna(r.get("sRPE")) else float(r.get("sRPE")),
-            None if pd.isna(r.get("Observaciones")) else str(r.get("Observaciones")),
-            now,
-        ))
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.executemany("""
-        INSERT INTO monitoring
-        (Fecha, Jugador, Posicion, Minutos, CMJ, RSI_mod, VMP, sRPE, Observaciones, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(Fecha, Jugador) DO UPDATE SET
-            Posicion=excluded.Posicion,
-            Minutos=excluded.Minutos,
-            CMJ=excluded.CMJ,
-            RSI_mod=excluded.RSI_mod,
-            VMP=excluded.VMP,
-            sRPE=excluded.sRPE,
-            Observaciones=excluded.Observaciones,
-            updated_at=excluded.updated_at
-    """, rows)
-    conn.commit()
-    conn.close()
+        rows.append({
+            "Fecha": str(pd.to_datetime(r["Fecha"]).date()),
+            "Jugador": str(r["Jugador"]),
+            "Posicion": None if pd.isna(r.get("Posicion")) else str(r.get("Posicion")),
+            "Minutos": None if pd.isna(r.get("Minutos")) else float(r.get("Minutos")),
+            "CMJ": None if pd.isna(r.get("CMJ")) else float(r.get("CMJ")),
+            "RSI_mod": None if pd.isna(r.get("RSI_mod")) else float(r.get("RSI_mod")),
+            "VMP": None if pd.isna(r.get("VMP")) else float(r.get("VMP")),
+            "sRPE": None if pd.isna(r.get("sRPE")) else float(r.get("sRPE")),
+            "Observaciones": None if pd.isna(r.get("Observaciones")) else str(r.get("Observaciones")),
+            "updated_at": now,
+        })
+
+    supabase.table("monitoring").upsert(
+        rows,
+        on_conflict="Fecha,Jugador"
+    ).execute()
+
+def delete_session_by_date(date_str):
+    supabase = get_supabase()
+    supabase.table("monitoring").delete().eq("Fecha", date_str).execute()
 
 # =========================================================
 # PARSER
@@ -277,7 +272,6 @@ def parse_tidy(df_raw, forced_date=None):
         df[c] = df[c].apply(safe_num)
     return df.dropna(subset=["Fecha","Jugador"]).drop_duplicates(subset=["Fecha","Jugador"], keep="last")
 
-
 def parse_block(df_raw):
     df = df_raw.copy()
     df.columns = range(df.shape[1])
@@ -379,12 +373,15 @@ def parse_uploaded(uploaded_file, forced_date=None):
         parsed = parse_tidy(df_raw, forced_date=forced_date)
     elif fmt == "block":
         parsed = parse_block(df_raw)
+        if forced_date is not None:
+            parsed["Fecha"] = pd.to_datetime(forced_date)
     else:
         raise ValueError("No se pudo detectar el formato del archivo.")
+
     if forced_date is not None:
         parsed["Fecha"] = pd.to_datetime(forced_date)
-    return parsed
 
+    return parsed
 
 # =========================================================
 # METRICS / DIAGNOSTIC
@@ -1151,16 +1148,11 @@ def build_pdf_bytes_team_session(team_day, selected_date):
 # =========================================================
 def page_cargar():
     st.markdown("### Cargar archivo semanal")
-    selected_date = st.date_input(
-        "Selecciona la fecha de la sesión",
-        value=pd.Timestamp.today().date(),
-        format="DD/MM/YYYY"
-    )
     uploaded = st.file_uploader("Sube tu Excel/CSV semanal", type=["xlsx","xls","csv"])
     if uploaded is not None:
         try:
-            parsed = parse_uploaded(uploaded, forced_date=selected_date)
-            st.success(f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · fecha asignada: {pd.to_datetime(selected_date).strftime('%Y-%m-%d')}")
+            parsed = parse_uploaded(uploaded)
+            st.success(f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · {parsed['Fecha'].nunique()} fecha(s)")
             st.dataframe(parsed, use_container_width=True, hide_index=True)
             if st.button("Guardar en base de datos", type="primary"):
                 upsert_monitoring(parsed)
@@ -1168,7 +1160,6 @@ def page_cargar():
                 st.rerun()
         except Exception as e:
             st.error(f"No se pudo interpretar el archivo: {e}")
-
 
 def page_equipo(metrics_df):
     if metrics_df.empty:
