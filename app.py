@@ -1148,19 +1148,11 @@ def build_pdf_bytes_team_session(team_day, selected_date):
 # =========================================================
 def page_cargar():
     st.markdown("### Cargar archivo semanal")
-    fecha_sesion = st.date_input(
-        "Selecciona la fecha a la que corresponde el archivo",
-        value=pd.Timestamp.today().date(),
-        format="DD/MM/YYYY"
-    )
     uploaded = st.file_uploader("Sube tu Excel/CSV semanal", type=["xlsx","xls","csv"])
     if uploaded is not None:
         try:
-            parsed = parse_uploaded(uploaded, forced_date=fecha_sesion)
-            st.success(
-                f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · "
-                f"fecha asignada: {pd.to_datetime(fecha_sesion).strftime('%Y-%m-%d')}"
-            )
+            parsed = parse_uploaded(uploaded)
+            st.success(f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · {parsed['Fecha'].nunique()} fecha(s)")
             st.dataframe(parsed, use_container_width=True, hide_index=True)
             if st.button("Guardar en base de datos", type="primary"):
                 upsert_monitoring(parsed)
