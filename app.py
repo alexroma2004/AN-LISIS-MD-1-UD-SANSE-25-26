@@ -114,6 +114,33 @@ st.markdown("""
     display:inline-block; padding:4px 10px; border-radius:999px; color:white;
     font-weight:700; font-size:0.78rem; margin-right:6px; margin-top:4px;
 }
+.player-card {
+    background: linear-gradient(135deg, #0F172A 0%, #1D4ED8 100%);
+    color: white; border-radius: 24px; padding: 20px 22px; margin-bottom: 12px;
+    box-shadow: 0 16px 36px rgba(15,23,42,0.22);
+}
+.player-card h3 {margin:0; font-size:1.7rem; line-height:1.1;}
+.player-card .sub {opacity:0.9; margin-top:0.25rem; font-size:0.95rem;}
+.player-badge {
+    display:inline-block; padding:6px 12px; border-radius:999px; font-weight:800; font-size:0.82rem;
+    color:white; margin-top:10px; margin-bottom:12px;
+}
+.player-msg {
+    background:#F8FAFC; border:1px solid rgba(15,23,42,0.08); border-radius:16px; padding:14px 16px;
+    color:#0F172A; font-size:0.96rem; line-height:1.45; margin-top:10px;
+}
+.mini-grid {
+    display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; margin-top:12px;
+}
+.mini-stat {
+    background: rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.12); border-radius:16px; padding:12px 14px;
+}
+.mini-stat .lab {font-size:0.78rem; opacity:0.85;}
+.mini-stat .val {font-size:1.2rem; font-weight:800; margin-top:2px;}
+.tag-soft {
+    display:inline-block; padding:5px 10px; border-radius:999px; font-weight:700; font-size:0.78rem;
+    background:#EEF2FF; color:#1D4ED8; margin-right:6px; margin-top:4px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -339,6 +366,92 @@ def plot_force_reactivity_scatter(df, rsi_ref, rel_ref):
     )
     return fig
 
+
+def fr_delta_text(value, ref, decimals=2, suffix=""):
+    if pd.isna(value) or pd.isna(ref):
+        return "Sin referencia"
+    delta = value - ref
+    sign = "+" if delta >= 0 else ""
+    return f"{sign}{delta:.{decimals}f}{suffix}"
+
+def force_profile_focus(profile_name):
+    mapping = {
+        "Avión": "Perfil muy completo: combina buena reactividad y buena fuerza relativa. La prioridad es mantener.",
+        "Tanque": "Predomina la fuerza relativa. La pista de mejora está en ganar reactividad y velocidad de expresión.",
+        "Elástico": "Predomina la reactividad. La pista de mejora está en ganar fuerza relativa sin perder frescura.",
+        "Base por desarrollar": "Todavía hay margen claro tanto en reactividad como en fuerza relativa. Conviene un trabajo global."
+    }
+    return mapping.get(profile_name, "Perfil no disponible.")
+
+def build_force_profile_message(row, rsi_ref, rel_ref):
+    profile = row.get("perfil_fr")
+    name = row.get("Jugador", "Jugador")
+    rsi = row.get("RSI_mod")
+    rel = row.get("est_1rm_rel")
+    parts = [f"{name} se sitúa ahora mismo en el perfil **{profile}**."]
+    parts.append(force_profile_focus(profile))
+
+    if pd.notna(rsi) and pd.notna(rsi_ref):
+        if rsi >= rsi_ref:
+            parts.append(f"Su RSI mod ({rsi:.3f}) está por encima de la referencia del grupo ({rsi_ref:.3f}).")
+        else:
+            parts.append(f"Su RSI mod ({rsi:.3f}) está por debajo de la referencia del grupo ({rsi_ref:.3f}).")
+
+    if pd.notna(rel) and pd.notna(rel_ref):
+        if rel >= rel_ref:
+            parts.append(f"Su 1RM relativa estimada ({rel:.2f} kg/kg) también está por encima de la referencia del grupo ({rel_ref:.2f} kg/kg).")
+        else:
+            parts.append(f"Su 1RM relativa estimada ({rel:.2f} kg/kg) está por debajo de la referencia del grupo ({rel_ref:.2f} kg/kg).")
+
+    if profile == "Avión":
+        parts.append("Mensaje práctico: mantener la base actual y afinar detalles sin meter fatiga innecesaria.")
+    elif profile == "Tanque":
+        parts.append("Mensaje práctico: priorizar tareas de salto, RSI, stiffness y acciones explosivas de baja pérdida técnica.")
+    elif profile == "Elástico":
+        parts.append("Mensaje práctico: introducir trabajo de fuerza útil para elevar la base sin apagar su componente reactivo.")
+    elif profile == "Base por desarrollar":
+        parts.append("Mensaje práctico: progresión equilibrada de fuerza general, técnica de sentadilla y tareas reactivas básicas.")
+    return " ".join(parts)
+
+def render_force_profile_card(row, rsi_ref, rel_ref):
+    profile = row.get("perfil_fr", "Perfil no disponible")
+    color = FORCE_PROFILE_COLORS.get(profile, "#334155")
+    rsi = row.get("RSI_mod")
+    rel = row.get("est_1rm_rel")
+    est = row.get("est_1rm")
+    vmp = row.get("VMP")
+    peso = row.get("Peso_corporal")
+    carga = row.get("Carga_sentadilla")
+
+    def fnum(x, d=2):
+        return "—" if pd.isna(x) else f"{x:.{d}f}"
+
+    card = f"""
+    <div class="player-card">
+        <div style="font-size:0.9rem; opacity:0.88;">Tarjeta individual</div>
+        <h3>{row.get("Jugador","Jugador")}</h3>
+        <div class="sub">Lectura rápida del perfil fuerza-reactividad en la fecha seleccionada.</div>
+        <div class="player-badge" style="background:{color};">{profile}</div>
+        <div class="mini-grid">
+            <div class="mini-stat"><div class="lab">RSI mod</div><div class="val">{fnum(rsi,3)}</div><div class="lab">{fr_delta_text(rsi, rsi_ref, 3)}</div></div>
+            <div class="mini-stat"><div class="lab">1RM relativa</div><div class="val">{fnum(rel,2)} kg/kg</div><div class="lab">{fr_delta_text(rel, rel_ref, 2)}</div></div>
+            <div class="mini-stat"><div class="lab">1RM estimada</div><div class="val">{fnum(est,1)} kg</div><div class="lab">estimación</div></div>
+            <div class="mini-stat"><div class="lab">VMP</div><div class="val">{fnum(vmp,3)} m/s</div><div class="lab">carga usada {fnum(carga,1)} kg</div></div>
+        </div>
+    </div>
+    """
+    st.markdown(card, unsafe_allow_html=True)
+
+    tags = []
+    if pd.notna(peso): tags.append(f'<span class="tag-soft">Peso corporal: {peso:.1f} kg</span>')
+    if pd.notna(carga): tags.append(f'<span class="tag-soft">Carga sentadilla: {carga:.1f} kg</span>')
+    if pd.notna(rsi_ref): tags.append(f'<span class="tag-soft">RSI ref. equipo: {rsi_ref:.3f}</span>')
+    if pd.notna(rel_ref): tags.append(f'<span class="tag-soft">1RM rel. ref.: {rel_ref:.2f} kg/kg</span>')
+    if tags:
+        st.markdown("".join(tags), unsafe_allow_html=True)
+
+    st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)}</div>', unsafe_allow_html=True)
+
 def page_force_reactivity(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -381,29 +494,65 @@ def page_force_reactivity(metrics_df):
             msg.append("sin carga de sentadilla: " + ", ".join(missing_load))
         st.info("Para que el perfil se calcule completo, faltan datos en: " + " · ".join(msg))
 
-    st.plotly_chart(plot_force_reactivity_scatter(fr_df, rsi_ref, rel_ref), use_container_width=True)
+    left, right = st.columns([1.45, 1], gap="large")
+    with left:
+        st.plotly_chart(plot_force_reactivity_scatter(fr_df, rsi_ref, rel_ref), use_container_width=True)
 
-    if not valid.empty:
-        summary = valid["perfil_fr"].value_counts().reindex(["Avión","Tanque","Elástico","Base por desarrollar"]).fillna(0).astype(int)
-        cols = st.columns(4)
-        for col, name in zip(cols, summary.index.tolist()):
-            with col:
-                kpi(name, int(summary[name]), "jugadores")
+        if not valid.empty:
+            summary = valid["perfil_fr"].value_counts().reindex(["Avión","Tanque","Elástico","Base por desarrollar"]).fillna(0).astype(int)
+            cols = st.columns(4)
+            for col, name in zip(cols, summary.index.tolist()):
+                with col:
+                    kpi(name, int(summary[name]), "jugadores")
 
-        st.markdown("### Tabla de perfiles del día")
-        show_cols = ["Jugador","RSI_mod","VMP","Carga_sentadilla","Peso_corporal","est_1rm","est_1rm_rel","perfil_fr"]
-        st.dataframe(
-            valid[show_cols].sort_values(["perfil_fr","est_1rm_rel"], ascending=[True, False]).rename(columns={
-                "RSI_mod":"RSI mod",
-                "VMP":"VMP",
-                "Carga_sentadilla":"Carga sentadilla (kg)",
-                "Peso_corporal":"Peso corporal (kg)",
-                "est_1rm":"1RM estimada (kg)",
-                "est_1rm_rel":"1RM relativa (kg/kg)",
-                "perfil_fr":"Perfil"
-            }),
-            use_container_width=True, hide_index=True
-        )
+            st.markdown("### Tabla de perfiles del día")
+            show_cols = ["Jugador","RSI_mod","VMP","Carga_sentadilla","Peso_corporal","est_1rm","est_1rm_rel","perfil_fr"]
+            st.dataframe(
+                valid[show_cols].sort_values(["perfil_fr","est_1rm_rel"], ascending=[True, False]).rename(columns={
+                    "RSI_mod":"RSI mod",
+                    "VMP":"VMP",
+                    "Carga_sentadilla":"Carga sentadilla (kg)",
+                    "Peso_corporal":"Peso corporal (kg)",
+                    "est_1rm":"1RM estimada (kg)",
+                    "est_1rm_rel":"1RM relativa (kg/kg)",
+                    "perfil_fr":"Perfil"
+                }),
+                use_container_width=True, hide_index=True
+            )
+    with right:
+        st.markdown("### Vista jugador-friendly")
+        if valid.empty:
+            st.info("No hay suficientes datos para generar tarjetas individuales.")
+        else:
+            players = valid["Jugador"].dropna().astype(str).sort_values().unique().tolist()
+            default_idx = 0
+            selected_player = st.selectbox("Selecciona un jugador", players, index=default_idx, key="fr_player")
+            row = valid[valid["Jugador"] == selected_player].iloc[0]
+            render_force_profile_card(row, rsi_ref, rel_ref)
+
+            st.markdown("### Ranking rápido")
+            r1, r2 = st.columns(2)
+            with r1:
+                top_rsi = valid.sort_values("RSI_mod", ascending=False)[["Jugador","RSI_mod"]].head(3).copy()
+                st.markdown("**Top 3 RSI mod**")
+                for i, (_, rr) in enumerate(top_rsi.iterrows(), start=1):
+                    st.markdown(f"{i}. **{rr['Jugador']}** · {rr['RSI_mod']:.3f}")
+            with r2:
+                top_rel = valid.sort_values("est_1rm_rel", ascending=False)[["Jugador","est_1rm_rel"]].head(3).copy()
+                st.markdown("**Top 3 1RM relativa**")
+                for i, (_, rr) in enumerate(top_rel.iterrows(), start=1):
+                    st.markdown(f"{i}. **{rr['Jugador']}** · {rr['est_1rm_rel']:.2f} kg/kg")
+
+            st.markdown("### Cómo leer el perfil")
+            st.markdown(
+                "- **Avión**: alto RSI mod y alta fuerza relativa.
+"
+                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.
+"
+                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.
+"
+                "- **Base por desarrollar**: margen claro en ambas dimensiones."
+            )
 
 # =========================================================
 # PARSER
