@@ -215,55 +215,6 @@ st.markdown("""
     font-weight:700;
     margin-top:10px;
 }
-.phone-shell {
-    max-width: 430px;
-    margin: 0 auto 14px auto;
-    background: linear-gradient(180deg, #0F172A 0%, #111827 100%);
-    border-radius: 34px;
-    padding: 14px;
-    box-shadow: 0 18px 40px rgba(15,23,42,0.22);
-}
-.phone-screen {
-    background: linear-gradient(180deg, #F8FAFC 0%, #EEF2FF 100%);
-    border-radius: 26px;
-    padding: 18px 16px 16px 16px;
-    min-height: 720px;
-}
-.phone-top {
-    display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;
-    color:#334155; font-size:0.8rem; font-weight:800;
-}
-.phone-badge {
-    display:inline-block; padding:7px 12px; border-radius:999px; color:white; font-weight:900; font-size:0.8rem; margin-top:10px;
-}
-.phone-title {
-    font-size: 1.65rem; line-height:1.05; font-weight:900; color:#0F172A; margin: 8px 0 4px 0;
-}
-.phone-sub {
-    font-size:0.92rem; color:#475467; margin-bottom:12px;
-}
-.phone-grid {
-    display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; margin: 12px 0;
-}
-.phone-stat {
-    background:white; border:1px solid rgba(15,23,42,0.06); border-radius:18px; padding:12px 12px;
-    box-shadow: 0 8px 18px rgba(15,23,42,0.06);
-}
-.phone-stat .lab {font-size:0.77rem; color:#667085; font-weight:700;}
-.phone-stat .val {font-size:1.18rem; color:#101828; font-weight:900; margin-top:2px;}
-.phone-stat .sub {font-size:0.76rem; color:#667085; margin-top:4px;}
-.phone-panel {
-    background:white; border:1px solid rgba(15,23,42,0.06); border-radius:18px; padding:13px 14px;
-    box-shadow: 0 8px 18px rgba(15,23,42,0.06); margin-top:10px;
-}
-.phone-panel h4 {margin:0 0 8px 0; font-size:0.96rem; color:#0F172A;}
-.phone-chip {
-    display:inline-block; padding:6px 10px; border-radius:999px; font-weight:800; font-size:0.76rem; margin-right:6px; margin-bottom:6px;
-    background:#EEF2FF; color:#1D4ED8;
-}
-.phone-note {
-    background:#EFF6FF; border:1px solid #DBEAFE; color:#1D4ED8; border-radius:16px; padding:12px 13px; font-size:0.88rem; font-weight:800; margin-top:10px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -885,90 +836,6 @@ def style_team_summary(df):
     styler = styler.map(color_priority, subset=["Prioridad"])
     return styler
 
-
-def render_player_mobile_screen(row, rsi_ref, rel_ref, metrics_df=None, selected_date=None):
-    profile = row.get("perfil_fr", "Perfil no disponible")
-    color = FORCE_PROFILE_COLORS.get(profile, "#334155")
-    player = row.get("Jugador", "Jugador")
-    rsi = row.get("RSI_mod")
-    rel = row.get("est_1rm_rel")
-    est = row.get("est_1rm")
-    vmp = row.get("VMP")
-    peso = row.get("Peso_corporal")
-    carga = row.get("Carga_sentadilla")
-    score = force_profile_score(rsi, rel, rsi_ref, rel_ref)
-    balance_label = classify_balance_level(rsi, rel, rsi_ref, rel_ref)
-    priority = action_priority_label(profile, balance_label)
-
-    prev_row = latest_previous_player_row(metrics_df, player, selected_date) if metrics_df is not None and selected_date is not None else None
-    prev_rsi = prev_row["RSI_mod"] if prev_row is not None and "RSI_mod" in prev_row else np.nan
-    prev_vmp = prev_row["VMP"] if prev_row is not None and "VMP" in prev_row else np.nan
-    prev_est_1rm = estimate_1rm_from_load_vmp(carga, prev_vmp) if prev_row is not None else np.nan
-    prev_rel = prev_est_1rm / peso if pd.notna(prev_est_1rm) and pd.notna(peso) and peso > 0 else np.nan
-    s1, s2 = force_profile_strengths(profile)
-
-    def fnum(x, d=2, suffix=""):
-        return "—" if pd.isna(x) else f"{x:.{d}f}{suffix}"
-
-    html = f"""
-    <div class="phone-shell">
-      <div class="phone-screen">
-        <div class="phone-top">
-          <span>Perfil jugador</span>
-          <span>{pd.to_datetime(selected_date).strftime('%d/%m/%Y') if selected_date is not None else ''}</span>
-        </div>
-        <div class="phone-title">{player}</div>
-        <div class="phone-sub">Lectura individual rápida del perfil fuerza-reactividad.</div>
-        <span class="phone-badge" style="background:{color};">{profile}</span>
-
-        <div class="phone-grid">
-          <div class="phone-stat">
-            <div class="lab">Score F-R</div>
-            <div class="val">{fnum(score,0)}/100</div>
-            <div class="sub">{score_label(score)}</div>
-          </div>
-          <div class="phone-stat">
-            <div class="lab">Prioridad</div>
-            <div class="val" style="font-size:1rem;">{priority}</div>
-            <div class="sub">{balance_label}</div>
-          </div>
-          <div class="phone-stat">
-            <div class="lab">RSI mod</div>
-            <div class="val">{fnum(rsi,3)}</div>
-            <div class="sub">vs última: {compact_delta(rsi, prev_rsi, 3)}</div>
-          </div>
-          <div class="phone-stat">
-            <div class="lab">1RM relativa</div>
-            <div class="val">{fnum(rel,2,' kg/kg')}</div>
-            <div class="sub">vs última: {compact_delta(rel, prev_rel, 2)}</div>
-          </div>
-        </div>
-
-        <div class="phone-panel">
-          <h4>Datos clave</h4>
-          <span class="phone-chip">1RM estimada: {fnum(est,1,' kg')}</span>
-          <span class="phone-chip">VMP: {fnum(vmp,3,' m/s')}</span>
-          <span class="phone-chip">Peso corporal: {fnum(peso,1,' kg')}</span>
-          <span class="phone-chip">Carga sentadilla: {fnum(carga,1,' kg')}</span>
-        </div>
-
-        <div class="phone-panel">
-          <h4>Fortalezas</h4>
-          <span class="phone-chip">{s1}</span>
-          <span class="phone-chip">{s2}</span>
-        </div>
-
-        <div class="phone-panel">
-          <h4>Mensaje rápido</h4>
-          <div style="color:#334155; font-size:0.9rem; line-height:1.45;">{build_force_profile_message(row, rsi_ref, rel_ref)}</div>
-        </div>
-
-        <div class="phone-note">Prioridad principal: <b>{priority}</b>.</div>
-      </div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
 def page_force_reactivity(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -1088,14 +955,9 @@ def page_force_reactivity(metrics_df):
         else:
             valid["score_fr"] = valid.apply(lambda r: force_profile_score(r.get("RSI_mod"), r.get("est_1rm_rel"), rsi_ref, rel_ref), axis=1)
             players = valid["Jugador"].dropna().astype(str).sort_values().unique().tolist()
-            view_mode = st.radio("Modo de visualización", ["Dashboard", "Modo móvil / jugador"], horizontal=True, key="fr_view_mode")
             selected_player = st.selectbox("Selecciona un jugador", players, index=0, key="fr_player")
             row = valid[valid["Jugador"] == selected_player].iloc[0]
-
-            if view_mode == "Dashboard":
-                render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
-            else:
-                render_player_mobile_screen(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
+            render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Recomendación automática</span></div>', unsafe_allow_html=True)
             balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
