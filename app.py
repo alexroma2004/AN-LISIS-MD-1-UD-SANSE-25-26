@@ -413,7 +413,77 @@ def build_force_profile_message(row, rsi_ref, rel_ref):
         parts.append("Mensaje práctico: progresión equilibrada de fuerza general, técnica de sentadilla y tareas reactivas básicas.")
     return " ".join(parts)
 
-def render_force_profile_card(row, rsi_ref, rel_ref):
+
+def latest_previous_player_row(metrics_df, player, selected_date):
+    if metrics_df.empty:
+        return None
+    dfp = metrics_df[metrics_df["Jugador"] == player].copy()
+    dfp = dfp[dfp["Fecha"].dt.normalize() < pd.to_datetime(selected_date).normalize()]
+    if dfp.empty:
+        return None
+    return dfp.sort_values("Fecha").iloc[-1]
+
+def player_ma3_context(metrics_df, player, selected_date):
+    if metrics_df.empty:
+        return {}
+    dfp = metrics_df[metrics_df["Jugador"] == player].copy()
+    dfp = dfp[dfp["Fecha"].dt.normalize() <= pd.to_datetime(selected_date).normalize()]
+    if dfp.empty:
+        return {}
+    dfp = dfp.sort_values("Fecha").tail(3)
+    out = {}
+    for col in ["RSI_mod", "VMP", "CMJ"]:
+        vals = pd.to_numeric(dfp[col], errors="coerce").dropna()
+        out[f"{col}_ma3"] = vals.mean() if not vals.empty else np.nan
+    return out
+
+def force_profile_priority(profile_name):
+    mapping = {
+        "Avión": "Mantener y afinar",
+        "Tanque": "Potenciar reactividad",
+        "Elástico": "Potenciar fuerza relativa",
+        "Base por desarrollar": "Desarrollo global",
+    }
+    return mapping.get(profile_name, "Sin prioridad definida")
+
+def force_profile_strengths(profile_name):
+    mapping = {
+        "Avión": ("Buena reactividad", "Buena fuerza relativa"),
+        "Tanque": ("Base de fuerza sólida", "Potencial de transferencia alto"),
+        "Elástico": ("Buen componente reactivo", "Expresión neuromuscular interesante"),
+        "Base por desarrollar": ("Margen de mejora amplio", "Perfil muy moldeable"),
+    }
+    return mapping.get(profile_name, ("—", "—"))
+
+def force_profile_score(rsi, rel, rsi_ref, rel_ref):
+    if pd.isna(rsi) or pd.isna(rel) or pd.isna(rsi_ref) or pd.isna(rel_ref) or rsi_ref <= 0 or rel_ref <= 0:
+        return np.nan
+    score = 50 * (rsi / rsi_ref) + 50 * (rel / rel_ref)
+    return float(np.clip(score, 0, 100))
+
+def score_label(score):
+    if pd.isna(score):
+        return "Sin score"
+    if score >= 85:
+        return "Perfil muy completo"
+    if score >= 70:
+        return "Buen perfil"
+    if score >= 55:
+        return "Perfil con margen"
+    return "Perfil por desarrollar"
+
+def compact_delta(curr, prev, decimals=3, suffix=""):
+    if pd.isna(curr) or pd.isna(prev):
+        return "Sin referencia"
+    delta = curr - prev
+    pct = (delta / prev * 100) if prev != 0 else np.nan
+    arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+    if pd.isna(pct):
+        return f"{arrow} {delta:.{decimals}f}{suffix}"
+    return f"{arrow} {delta:.{decimals}f}{suffix} ({pct:+.1f}%)"
+
+
+def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_date=None):
     profile = row.get("perfil_fr", "Perfil no disponible")
     color = FORCE_PROFILE_COLORS.get(profile, "#334155")
     rsi = row.get("RSI_mod")
@@ -422,6 +492,15 @@ def render_force_profile_card(row, rsi_ref, rel_ref):
     vmp = row.get("VMP")
     peso = row.get("Peso_corporal")
     carga = row.get("Carga_sentadilla")
+    player = row.get("Jugador", "Jugador")
+
+    prev_row = latest_previous_player_row(metrics_df, player, selected_date) if metrics_df is not None and selected_date is not None else None
+    ctx_ma3 = player_ma3_context(metrics_df, player, selected_date) if metrics_df is not None and selected_date is not None else {}
+    prev_rsi = prev_row["RSI_mod"] if prev_row is not None and "RSI_mod" in prev_row else np.nan
+    prev_vmp = prev_row["VMP"] if prev_row is not None and "VMP" in prev_row else np.nan
+    score = force_profile_score(rsi, rel, rsi_ref, rel_ref)
+    strength_1, strength_2 = force_profile_strengths(profile)
+    priority = force_profile_priority(profile)
 
     def fnum(x, d=2):
         return "—" if pd.isna(x) else f"{x:.{d}f}"
@@ -429,26 +508,32 @@ def render_force_profile_card(row, rsi_ref, rel_ref):
     card = f"""
     <div class="player-card">
         <div style="font-size:0.9rem; opacity:0.88;">Tarjeta individual</div>
-        <h3>{row.get("Jugador","Jugador")}</h3>
+        <h3>{player}</h3>
         <div class="sub">Lectura rápida del perfil fuerza-reactividad en la fecha seleccionada.</div>
         <div class="player-badge" style="background:{color};">{profile}</div>
         <div class="mini-grid">
-            <div class="mini-stat"><div class="lab">RSI mod</div><div class="val">{fnum(rsi,3)}</div><div class="lab">{fr_delta_text(rsi, rsi_ref, 3)}</div></div>
-            <div class="mini-stat"><div class="lab">1RM relativa</div><div class="val">{fnum(rel,2)} kg/kg</div><div class="lab">{fr_delta_text(rel, rel_ref, 2)}</div></div>
+            <div class="mini-stat"><div class="lab">RSI mod</div><div class="val">{fnum(rsi,3)}</div><div class="lab">vs última: {compact_delta(rsi, prev_rsi, 3)}</div></div>
+            <div class="mini-stat"><div class="lab">1RM relativa</div><div class="val">{fnum(rel,2)} kg/kg</div><div class="lab">vs equipo: {fr_delta_text(rel, rel_ref, 2)}</div></div>
             <div class="mini-stat"><div class="lab">1RM estimada</div><div class="val">{fnum(est,1)} kg</div><div class="lab">estimación</div></div>
-            <div class="mini-stat"><div class="lab">VMP</div><div class="val">{fnum(vmp,3)} m/s</div><div class="lab">carga usada {fnum(carga,1)} kg</div></div>
+            <div class="mini-stat"><div class="lab">VMP</div><div class="val">{fnum(vmp,3)} m/s</div><div class="lab">vs última: {compact_delta(vmp, prev_vmp, 3, " m/s")}</div></div>
         </div>
     </div>
     """
     st.markdown(card, unsafe_allow_html=True)
 
-    tags = []
-    if pd.notna(peso): tags.append(f'<span class="tag-soft">Peso corporal: {peso:.1f} kg</span>')
-    if pd.notna(carga): tags.append(f'<span class="tag-soft">Carga sentadilla: {carga:.1f} kg</span>')
-    if pd.notna(rsi_ref): tags.append(f'<span class="tag-soft">RSI ref. equipo: {rsi_ref:.3f}</span>')
-    if pd.notna(rel_ref): tags.append(f'<span class="tag-soft">1RM rel. ref.: {rel_ref:.2f} kg/kg</span>')
-    if tags:
-        st.markdown("".join(tags), unsafe_allow_html=True)
+    t1, t2 = st.columns(2)
+    with t1:
+        st.markdown(f'<span class="tag-soft">Fortaleza 1: {strength_1}</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="tag-soft">Fortaleza 2: {strength_2}</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="tag-soft">Prioridad: {priority}</span>', unsafe_allow_html=True)
+    with t2:
+        tags = []
+        if pd.notna(peso): tags.append(f'<span class="tag-soft">Peso corporal: {peso:.1f} kg</span>')
+        if pd.notna(carga): tags.append(f'<span class="tag-soft">Carga sentadilla: {carga:.1f} kg</span>')
+        if pd.notna(ctx_ma3.get("RSI_mod_ma3", np.nan)): tags.append(f'<span class="tag-soft">RSI MA3: {ctx_ma3["RSI_mod_ma3"]:.3f}</span>')
+        if pd.notna(score): tags.append(f'<span class="tag-soft">Score F-R: {score:.0f}/100 · {score_label(score)}</span>')
+        for tag in tags:
+            st.markdown(tag, unsafe_allow_html=True)
 
     st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)}</div>', unsafe_allow_html=True)
 
@@ -505,17 +590,19 @@ def page_force_reactivity(metrics_df):
                 with col:
                     kpi(name, int(summary[name]), "jugadores")
 
+            valid["score_fr"] = valid.apply(lambda r: force_profile_score(r.get("RSI_mod"), r.get("est_1rm_rel"), rsi_ref, rel_ref), axis=1)
             st.markdown("### Tabla de perfiles del día")
-            show_cols = ["Jugador","RSI_mod","VMP","Carga_sentadilla","Peso_corporal","est_1rm","est_1rm_rel","perfil_fr"]
+            show_cols = ["Jugador","RSI_mod","VMP","Carga_sentadilla","Peso_corporal","est_1rm","est_1rm_rel","perfil_fr","score_fr"]
             st.dataframe(
-                valid[show_cols].sort_values(["perfil_fr","est_1rm_rel"], ascending=[True, False]).rename(columns={
+                valid[show_cols].sort_values(["score_fr","est_1rm_rel"], ascending=[False, False]).rename(columns={
                     "RSI_mod":"RSI mod",
                     "VMP":"VMP",
                     "Carga_sentadilla":"Carga sentadilla (kg)",
                     "Peso_corporal":"Peso corporal (kg)",
                     "est_1rm":"1RM estimada (kg)",
                     "est_1rm_rel":"1RM relativa (kg/kg)",
-                    "perfil_fr":"Perfil"
+                    "perfil_fr":"Perfil",
+                    "score_fr":"Score F-R"
                 }),
                 use_container_width=True, hide_index=True
             )
@@ -524,30 +611,37 @@ def page_force_reactivity(metrics_df):
         if valid.empty:
             st.info("No hay suficientes datos para generar tarjetas individuales.")
         else:
+            valid["score_fr"] = valid.apply(lambda r: force_profile_score(r.get("RSI_mod"), r.get("est_1rm_rel"), rsi_ref, rel_ref), axis=1)
             players = valid["Jugador"].dropna().astype(str).sort_values().unique().tolist()
-            default_idx = 0
-            selected_player = st.selectbox("Selecciona un jugador", players, index=default_idx, key="fr_player")
+            selected_player = st.selectbox("Selecciona un jugador", players, index=0, key="fr_player")
             row = valid[valid["Jugador"] == selected_player].iloc[0]
-            render_force_profile_card(row, rsi_ref, rel_ref)
+            render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
+
+            st.markdown("### Recomendación automática")
+            st.info(f"Prioridad principal para **{selected_player}**: **{force_profile_priority(row['perfil_fr'])}**.")
 
             st.markdown("### Ranking rápido")
             r1, r2 = st.columns(2)
             with r1:
-                top_rsi = valid.sort_values("RSI_mod", ascending=False)[["Jugador","RSI_mod"]].head(3).copy()
-                st.markdown("**Top 3 RSI mod**")
-                for i, (_, rr) in enumerate(top_rsi.iterrows(), start=1):
-                    st.markdown(f"{i}. **{rr['Jugador']}** · {rr['RSI_mod']:.3f}")
+                top_global = valid.sort_values("score_fr", ascending=False)[["Jugador","score_fr"]].head(3).copy()
+                st.markdown("**Top 3 score global**")
+                for i, (_, rr) in enumerate(top_global.iterrows(), start=1):
+                    st.markdown(f"{i}. **{rr['Jugador']}** · {rr['score_fr']:.0f}/100")
             with r2:
-                top_rel = valid.sort_values("est_1rm_rel", ascending=False)[["Jugador","est_1rm_rel"]].head(3).copy()
-                st.markdown("**Top 3 1RM relativa**")
-                for i, (_, rr) in enumerate(top_rel.iterrows(), start=1):
-                    st.markdown(f"{i}. **{rr['Jugador']}** · {rr['est_1rm_rel']:.2f} kg/kg")
+                balanced = valid.assign(balance=(valid["RSI_mod"]/rsi_ref - valid["est_1rm_rel"]/rel_ref).abs() if pd.notna(rsi_ref) and pd.notna(rel_ref) else np.nan)
+                top_bal = balanced.sort_values("balance", ascending=True)[["Jugador","balance"]].head(3).copy()
+                st.markdown("**Top 3 perfiles más equilibrados**")
+                for i, (_, rr) in enumerate(top_bal.iterrows(), start=1):
+                    st.markdown(f"{i}. **{rr['Jugador']}**")
 
             st.markdown("### Cómo leer el perfil")
             st.markdown(
-                "- **Avión**: alto RSI mod y alta fuerza relativa.\n"
-                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.\n"
-                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.\n"
+                "- **Avión**: alto RSI mod y alta fuerza relativa.
+"
+                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.
+"
+                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.
+"
                 "- **Base por desarrollar**: margen claro en ambas dimensiones."
             )
 
