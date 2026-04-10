@@ -614,6 +614,247 @@ def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_d
 
     st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)} El nivel absoluto actual se interpreta como <b>{abs_level}</b> y la prioridad práctica es <b>{adv_priority}</b>.</div>', unsafe_allow_html=True)
 
+
+def classify_balance_level(rsi, rel, rsi_ref, rel_ref):
+    if pd.isna(rsi) or pd.isna(rel) or pd.isna(rsi_ref) or pd.isna(rel_ref) or rsi_ref <= 0 or rel_ref <= 0:
+        return "Sin clasificar"
+    nr = rsi / rsi_ref
+    nf = rel / rel_ref
+    diff = abs(nr - nf)
+    mean_level = (nr + nf) / 2
+    if diff <= 0.10:
+        if mean_level >= 1.05:
+            return "Equilibrado alto"
+        elif mean_level >= 0.90:
+            return "Equilibrado medio"
+        else:
+            return "Equilibrado bajo"
+    else:
+        return "Desequilibrado reactivo" if nr > nf else "Desequilibrado fuerza"
+
+def action_priority_label(profile_name, balance_label):
+    if balance_label == "Equilibrado alto":
+        return "Mantener"
+    if balance_label == "Equilibrado medio":
+        return "Ajustar"
+    if balance_label == "Equilibrado bajo":
+        return "Desarrollo global"
+    if profile_name == "Tanque":
+        return "Potenciar reactividad"
+    if profile_name == "Elástico":
+        return "Potenciar fuerza"
+    if profile_name == "Base por desarrollar":
+        return "Desarrollo global"
+    return "Mantener"
+
+def trend_arrow(curr, prev):
+    if pd.isna(curr) or pd.isna(prev):
+        return "—"
+    if curr > prev:
+        return "↑"
+    if curr < prev:
+        return "↓"
+    return "→"
+
+def build_team_force_summary(valid_df, metrics_df, selected_date, rsi_ref, rel_ref):
+    rows = []
+    for _, row in valid_df.iterrows():
+        prev = latest_previous_player_row(metrics_df, row["Jugador"], selected_date)
+        prev_rsi = prev["RSI_mod"] if prev is not None and "RSI_mod" in prev else np.nan
+        prev_vmp = prev["VMP"] if prev is not None and "VMP" in prev else np.nan
+        prev_est_1rm = np.nan
+        if prev is not None:
+            prev_est_1rm = estimate_1rm_from_load_vmp(row.get("Carga_sentadilla"), prev.get("VMP"))
+        prev_rel = prev_est_1rm / row["Peso_corporal"] if pd.notna(prev_est_1rm) and pd.notna(row.get("Peso_corporal")) and row.get("Peso_corporal") > 0 else np.nan
+
+        score = force_profile_score(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+        balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+        idx = imbalance_index(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+        idx_label = imbalance_label(idx)
+        abs_level = global_absolute_level(row.get("RSI_mod"), row.get("est_1rm_rel"))
+        state_txt = "Estable"
+        if pd.notna(prev_rsi):
+            if row["RSI_mod"] > prev_rsi:
+                state_txt = "Mejorando"
+            elif row["RSI_mod"] < prev_rsi:
+                state_txt = "Bajando"
+
+        rows.append({
+            "Jugador": row["Jugador"],
+            "Perfil": row["perfil_fr"],
+            "Equilibrio": balance_label,
+            "Nivel absoluto": abs_level,
+            "Índice desequilibrio": round(idx, 3) if pd.notna(idx) else np.nan,
+            "Lectura desequilibrio": idx_label,
+            "Score F-R": round(score, 1) if pd.notna(score) else np.nan,
+            "RSI mod": row["RSI_mod"],
+            "1RM relativa (kg/kg)": row["est_1rm_rel"],
+            "Cambio RSI": trend_arrow(row["RSI_mod"], prev_rsi),
+            "Cambio 1RM rel": trend_arrow(row["est_1rm_rel"], prev_rel),
+            "Estado actual": state_txt,
+            "Prioridad avanzada": advanced_priority(row["perfil_fr"], balance_label, abs_level, idx),
+        })
+    return pd.DataFrame(rows)
+
+def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None, show_names=True):
+    if selected_profiles:
+        df = df[df["perfil_fr"].isin(selected_profiles)].copy()
+    fig = go.Figure()
+    plot_df = df.dropna(subset=["RSI_mod", "est_1rm_rel"]).copy()
+    if plot_df.empty:
+        fig.update_layout(height=560, title="RSI modificado vs 1RM relativa estimada")
+        return fig
+
+    for profile_name in ["Avión", "Tanque", "Elástico", "Base por desarrollar"]:
+        sub = plot_df[plot_df["perfil_fr"] == profile_name].copy()
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=sub["RSI_mod"],
+            y=sub["est_1rm_rel"],
+            mode="markers+text" if show_names else "markers",
+            name=profile_name,
+            text=sub["Jugador"] if show_names else None,
+            textposition="top center",
+            marker=dict(size=13, color=FORCE_PROFILE_COLORS[profile_name], line=dict(color="white", width=1.5)),
+            customdata=np.stack([
+                sub["VMP"].astype(float),
+                sub["Carga_sentadilla"].fillna(np.nan).astype(float),
+                sub["Peso_corporal"].fillna(np.nan).astype(float),
+                sub["est_1rm"].fillna(np.nan).astype(float),
+            ], axis=1),
+            hovertemplate="<b>%{text}</b><br>RSI mod: %{x:.3f}<br>1RM relativa: %{y:.2f} kg/kg<br>VMP: %{customdata[0]:.3f} m/s<br>Carga usada: %{customdata[1]:.1f} kg<br>Peso corporal: %{customdata[2]:.1f} kg<br>1RM estimada: %{customdata[3]:.1f} kg<extra></extra>",
+        ))
+
+    if pd.notna(rsi_ref):
+        fig.add_vline(x=float(rsi_ref), line_width=2, line_color="#475467")
+    if pd.notna(rel_ref):
+        fig.add_hline(y=float(rel_ref), line_width=2, line_color="#475467")
+
+    x_min = max(0.10, float(plot_df["RSI_mod"].min()) - 0.05)
+    x_max = float(plot_df["RSI_mod"].max()) + 0.05
+    y_min = max(0.4, float(plot_df["est_1rm_rel"].min()) - 0.15)
+    y_max = float(plot_df["est_1rm_rel"].max()) + 0.15
+    fig.update_xaxes(range=[x_min, x_max], title="RSI modificado")
+    fig.update_yaxes(range=[y_min, y_max], title="1RM relativa estimada (kg/kg)")
+
+    if pd.notna(rsi_ref) and pd.notna(rel_ref):
+        fig.add_annotation(x=x_max, y=y_max, text="AVIÓN", showarrow=False, xanchor="right", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Avión"]))
+        fig.add_annotation(x=x_min, y=y_max, text="TANQUE", showarrow=False, xanchor="left", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Tanque"]))
+        fig.add_annotation(x=x_max, y=y_min, text="ELÁSTICO", showarrow=False, xanchor="right", yanchor="bottom", font=dict(size=13, color=FORCE_PROFILE_COLORS["Elástico"]))
+        fig.add_annotation(x=x_min, y=y_min, text="BASE POR DESARROLLAR", showarrow=False, xanchor="left", yanchor="bottom", font=dict(size=12, color=FORCE_PROFILE_COLORS["Base por desarrollar"]))
+    fig.update_layout(title="RSI modificado vs 1RM relativa estimada", height=560, margin=dict(l=10, r=10, t=45, b=10), legend_title="Perfil")
+    return fig
+
+def render_team_summary_tiles(team_summary):
+    if team_summary.empty:
+        return
+    top_score = team_summary.sort_values("Score F-R", ascending=False).iloc[0]
+    top_balance = team_summary[team_summary["Equilibrio"].isin(["Equilibrado alto","Equilibrado medio"])]
+    top_balance_name = top_balance.iloc[0]["Jugador"] if not top_balance.empty else "—"
+    top_priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
+    top_priority = team_summary[top_priority_col].value_counts().idxmax() if not team_summary[top_priority_col].empty else "—"
+    mean_score = team_summary["Score F-R"].dropna().mean() if "Score F-R" in team_summary.columns else np.nan
+    html = f"""
+    <div class="summary-strip">
+        <div class="summary-tile">
+            <div class="icon">🏆</div>
+            <div class="top">Mejor score global</div>
+            <div class="big">{top_score['Jugador']}</div>
+            <div class="sub">{top_score['Score F-R']:.0f}/100 · {top_score['Perfil']}</div>
+        </div>
+        <div class="summary-tile">
+            <div class="icon">📈</div>
+            <div class="top">Media del equipo</div>
+            <div class="big">{mean_score:.0f}/100</div>
+            <div class="sub">score fuerza-reactividad del grupo</div>
+        </div>
+        <div class="summary-tile">
+            <div class="icon">⚖️</div>
+            <div class="top">Equilibrio destacado</div>
+            <div class="big">{top_balance_name}</div>
+            <div class="sub">perfil más consistente del día</div>
+        </div>
+        <div class="summary-tile">
+            <div class="icon">🎯</div>
+            <div class="top">Prioridad dominante</div>
+            <div class="big">{top_priority}</div>
+            <div class="sub">tendencia principal del grupo</div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+def plot_team_priority_bar(team_summary):
+    priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
+    counts = team_summary[priority_col].value_counts().reset_index()
+    counts.columns = ["Prioridad","Jugadores"]
+    fig = px.bar(counts, x="Prioridad", y="Jugadores", text="Jugadores", title="Prioridades de trabajo del grupo")
+    fig.update_traces(textposition="outside")
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), xaxis_title="", yaxis_title="Jugadores")
+    return fig
+
+def plot_balance_donut(team_summary):
+    counts = team_summary["Equilibrio"].value_counts().reset_index()
+    counts.columns = ["Equilibrio","Jugadores"]
+    fig = px.pie(counts, names="Equilibrio", values="Jugadores", hole=0.55, title="Distribución del equilibrio del equipo")
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), legend_title="")
+    return fig
+
+def style_team_summary(df):
+    def color_priority(val):
+        colors = {
+            "Mantener / afinar":"background-color: rgba(22,163,74,0.16); color:#166534; font-weight:700;",
+            "Optimizar sin desequilibrar":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Fuerza explosiva / RSI":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Fuerza máxima relativa":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
+            "Fuerza general + potencia básica":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
+            "Base de fuerza + reactividad":"background-color: rgba(217,119,6,0.14); color:#B45309; font-weight:700;",
+            "Ajuste individual":"background-color: rgba(71,85,105,0.14); color:#334155; font-weight:700;",
+        }
+        return colors.get(val, "")
+    def color_profile(val):
+        colors = {
+            "Avión":"background-color: rgba(37,99,235,0.14); color:#1D4ED8; font-weight:700;",
+            "Tanque":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Elástico":"background-color: rgba(5,150,105,0.14); color:#047857; font-weight:700;",
+            "Base por desarrollar":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    def color_balance(val):
+        colors = {
+            "Equilibrado alto":"background-color: rgba(22,163,74,0.14); color:#166534; font-weight:700;",
+            "Equilibrado medio":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Equilibrado bajo":"background-color: rgba(245,158,11,0.16); color:#B45309; font-weight:700;",
+            "Desequilibrado reactivo":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Desequilibrado fuerza":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    def color_level(val):
+        colors = {
+            "Alto":"background-color: rgba(22,163,74,0.14); color:#166534; font-weight:700;",
+            "Medio":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Bajo":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    styler = df.style.format({
+        "Score F-R":"{:.1f}",
+        "RSI mod":"{:.3f}",
+        "1RM relativa (kg/kg)":"{:.2f}",
+        "Índice desequilibrio":"{:.3f}",
+    })
+    if "Perfil" in df.columns:
+        styler = styler.map(color_profile, subset=["Perfil"])
+    if "Equilibrio" in df.columns:
+        styler = styler.map(color_balance, subset=["Equilibrio"])
+    if "Nivel absoluto" in df.columns:
+        styler = styler.map(color_level, subset=["Nivel absoluto"])
+    if "Prioridad avanzada" in df.columns:
+        styler = styler.map(color_priority, subset=["Prioridad avanzada"])
+    elif "Prioridad" in df.columns:
+        styler = styler.map(color_priority, subset=["Prioridad"])
+    return styler
+
 def page_force_reactivity(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
