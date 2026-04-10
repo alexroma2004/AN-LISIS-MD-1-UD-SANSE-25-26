@@ -537,6 +537,128 @@ def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_d
 
     st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)}</div>', unsafe_allow_html=True)
 
+
+def classify_balance_level(rsi, rel, rsi_ref, rel_ref):
+    if pd.isna(rsi) or pd.isna(rel) or pd.isna(rsi_ref) or pd.isna(rel_ref) or rsi_ref <= 0 or rel_ref <= 0:
+        return "Sin clasificar"
+    nr = rsi / rsi_ref
+    nf = rel / rel_ref
+    diff = abs(nr - nf)
+    mean_level = (nr + nf) / 2
+
+    if diff <= 0.10:
+        if mean_level >= 1.05:
+            return "Equilibrado alto"
+        elif mean_level >= 0.90:
+            return "Equilibrado medio"
+        else:
+            return "Equilibrado bajo"
+    else:
+        if nr > nf:
+            return "Desequilibrado reactivo"
+        else:
+            return "Desequilibrado fuerza"
+
+def action_priority_label(profile_name, balance_label):
+    if balance_label == "Equilibrado alto":
+        return "Mantener"
+    if balance_label == "Equilibrado medio":
+        return "Ajustar"
+    if balance_label == "Equilibrado bajo":
+        return "Desarrollo global"
+    if profile_name == "Tanque":
+        return "Potenciar reactividad"
+    if profile_name == "Elástico":
+        return "Potenciar fuerza"
+    if profile_name == "Base por desarrollar":
+        return "Desarrollo global"
+    return "Mantener"
+
+def trend_arrow(curr, prev):
+    if pd.isna(curr) or pd.isna(prev):
+        return "—"
+    if curr > prev:
+        return "↑"
+    if curr < prev:
+        return "↓"
+    return "→"
+
+def build_team_force_summary(valid_df, metrics_df, selected_date, rsi_ref, rel_ref):
+    rows = []
+    for _, row in valid_df.iterrows():
+        prev = latest_previous_player_row(metrics_df, row["Jugador"], selected_date)
+        prev_rsi = prev["RSI_mod"] if prev is not None and "RSI_mod" in prev else np.nan
+        prev_vmp = prev["VMP"] if prev is not None and "VMP" in prev else np.nan
+        prev_est_1rm = np.nan
+        if prev is not None:
+            prev_est_1rm = estimate_1rm_from_load_vmp(row.get("Carga_sentadilla"), prev.get("VMP"))
+        prev_rel = prev_est_1rm / row["Peso_corporal"] if pd.notna(prev_est_1rm) and pd.notna(row.get("Peso_corporal")) and row.get("Peso_corporal") > 0 else np.nan
+        score = force_profile_score(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+        balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+        rows.append({
+            "Jugador": row["Jugador"],
+            "Perfil": row["perfil_fr"],
+            "Equilibrio": balance_label,
+            "Score F-R": round(score, 1) if pd.notna(score) else np.nan,
+            "RSI mod": row["RSI_mod"],
+            "1RM relativa (kg/kg)": row["est_1rm_rel"],
+            "Cambio RSI": trend_arrow(row["RSI_mod"], prev_rsi),
+            "Cambio 1RM rel": trend_arrow(row["est_1rm_rel"], prev_rel),
+            "Prioridad": action_priority_label(row["perfil_fr"], balance_label),
+        })
+    return pd.DataFrame(rows)
+
+def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None, show_names=True):
+    if selected_profiles:
+        df = df[df["perfil_fr"].isin(selected_profiles)].copy()
+    fig = go.Figure()
+    plot_df = df.dropna(subset=["RSI_mod", "est_1rm_rel"]).copy()
+    if plot_df.empty:
+        fig.update_layout(height=560, title="RSI modificado vs 1RM relativa estimada")
+        return fig
+
+    for profile_name in ["Avión", "Tanque", "Elástico", "Base por desarrollar"]:
+        sub = plot_df[plot_df["perfil_fr"] == profile_name].copy()
+        if sub.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=sub["RSI_mod"],
+            y=sub["est_1rm_rel"],
+            mode="markers+text" if show_names else "markers",
+            name=profile_name,
+            text=sub["Jugador"] if show_names else None,
+            textposition="top center",
+            marker=dict(size=13, color=FORCE_PROFILE_COLORS[profile_name], line=dict(color="white", width=1.5)),
+            customdata=np.stack([
+                sub["VMP"].astype(float),
+                sub["Carga_sentadilla"].fillna(np.nan).astype(float),
+                sub["Peso_corporal"].fillna(np.nan).astype(float),
+                sub["est_1rm"].fillna(np.nan).astype(float),
+            ], axis=1),
+            hovertemplate="<b>%{text}</b><br>RSI mod: %{x:.3f}<br>1RM relativa: %{y:.2f} kg/kg<br>VMP: %{customdata[0]:.3f} m/s<br>Carga usada: %{customdata[1]:.1f} kg<br>Peso corporal: %{customdata[2]:.1f} kg<br>1RM estimada: %{customdata[3]:.1f} kg<extra></extra>",
+        ))
+
+    if pd.notna(rsi_ref):
+        fig.add_vline(x=float(rsi_ref), line_width=2, line_color="#475467")
+    if pd.notna(rel_ref):
+        fig.add_hline(y=float(rel_ref), line_width=2, line_color="#475467")
+
+    x_min = max(0.10, float(plot_df["RSI_mod"].min()) - 0.05)
+    x_max = float(plot_df["RSI_mod"].max()) + 0.05
+    y_min = max(0.4, float(plot_df["est_1rm_rel"].min()) - 0.15)
+    y_max = float(plot_df["est_1rm_rel"].max()) + 0.15
+    fig.update_xaxes(range=[x_min, x_max], title="RSI modificado")
+    fig.update_yaxes(range=[y_min, y_max], title="1RM relativa estimada (kg/kg)")
+
+    if pd.notna(rsi_ref) and pd.notna(rel_ref):
+        fig.add_annotation(x=x_max, y=y_max, text="AVIÓN", showarrow=False, xanchor="right", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Avión"]))
+        fig.add_annotation(x=x_min, y=y_max, text="TANQUE", showarrow=False, xanchor="left", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Tanque"]))
+        fig.add_annotation(x=x_max, y=y_min, text="ELÁSTICO", showarrow=False, xanchor="right", yanchor="bottom", font=dict(size=13, color=FORCE_PROFILE_COLORS["Elástico"]))
+        fig.add_annotation(x=x_min, y=y_min, text="BASE POR DESARROLLAR", showarrow=False, xanchor="left", yanchor="bottom", font=dict(size=12, color=FORCE_PROFILE_COLORS["Base por desarrollar"]))
+    fig.update_layout(title="RSI modificado vs 1RM relativa estimada", height=560, margin=dict(l=10, r=10, t=45, b=10), legend_title="Perfil")
+    return fig
+
+
 def page_force_reactivity(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -579,33 +701,58 @@ def page_force_reactivity(metrics_df):
             msg.append("sin carga de sentadilla: " + ", ".join(missing_load))
         st.info("Para que el perfil se calcule completo, faltan datos en: " + " · ".join(msg))
 
-    left, right = st.columns([1.45, 1], gap="large")
+    left, right = st.columns([1.55, 1], gap="large")
     with left:
-        st.plotly_chart(plot_force_reactivity_scatter(fr_df, rsi_ref, rel_ref), use_container_width=True)
+        st.markdown("### Scatter colectivo")
+        filter_col1, filter_col2 = st.columns([1.5, 1])
+        with filter_col1:
+            selected_profiles = st.multiselect(
+                "Filtrar por perfil",
+                ["Avión", "Tanque", "Elástico", "Base por desarrollar"],
+                default=["Avión", "Tanque", "Elástico", "Base por desarrollar"],
+                key="fr_profiles_filter"
+            )
+        with filter_col2:
+            show_names = st.toggle("Mostrar nombres", value=True, key="fr_show_names")
+
+        st.plotly_chart(
+            plot_force_reactivity_filtered(fr_df, rsi_ref, rel_ref, selected_profiles=selected_profiles, show_names=show_names),
+            use_container_width=True
+        )
 
         if not valid.empty:
-            summary = valid["perfil_fr"].value_counts().reindex(["Avión","Tanque","Elástico","Base por desarrollar"]).fillna(0).astype(int)
-            cols = st.columns(4)
-            for col, name in zip(cols, summary.index.tolist()):
-                with col:
-                    kpi(name, int(summary[name]), "jugadores")
-
             valid["score_fr"] = valid.apply(lambda r: force_profile_score(r.get("RSI_mod"), r.get("est_1rm_rel"), rsi_ref, rel_ref), axis=1)
-            st.markdown("### Tabla de perfiles del día")
-            show_cols = ["Jugador","RSI_mod","VMP","Carga_sentadilla","Peso_corporal","est_1rm","est_1rm_rel","perfil_fr","score_fr"]
-            st.dataframe(
-                valid[show_cols].sort_values(["score_fr","est_1rm_rel"], ascending=[False, False]).rename(columns={
-                    "RSI_mod":"RSI mod",
-                    "VMP":"VMP",
-                    "Carga_sentadilla":"Carga sentadilla (kg)",
-                    "Peso_corporal":"Peso corporal (kg)",
-                    "est_1rm":"1RM estimada (kg)",
-                    "est_1rm_rel":"1RM relativa (kg/kg)",
-                    "perfil_fr":"Perfil",
-                    "score_fr":"Score F-R"
-                }),
-                use_container_width=True, hide_index=True
+            team_summary = build_team_force_summary(valid, metrics_df, selected_date, rsi_ref, rel_ref)
+
+            st.markdown("### Panel colectivo del equipo")
+            sort_by = st.selectbox(
+                "Ordenar tabla por",
+                ["Score F-R", "Jugador", "Perfil", "Equilibrio", "Prioridad"],
+                index=0,
+                key="fr_sort_team"
             )
+            ascending = sort_by in ["Jugador", "Perfil", "Equilibrio", "Prioridad"]
+            st.dataframe(
+                team_summary.sort_values(sort_by, ascending=ascending),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.markdown("### Resumen de perfiles")
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                balance_counts = team_summary["Equilibrio"].value_counts()
+                for label in ["Equilibrado alto", "Equilibrado medio", "Equilibrado bajo"]:
+                    kpi(label, int(balance_counts.get(label, 0)), "jugadores")
+            with s2:
+                for label in ["Desequilibrado reactivo", "Desequilibrado fuerza"]:
+                    kpi(label, int(balance_counts.get(label, 0)), "jugadores")
+            with s3:
+                priority_counts = team_summary["Prioridad"].value_counts()
+                for label in ["Mantener", "Ajustar", "Potenciar reactividad", "Potenciar fuerza", "Desarrollo global"]:
+                    if label in priority_counts.index:
+                        kpi(label, int(priority_counts.get(label, 0)), "prioridad")
+
     with right:
         st.markdown("### Vista jugador-friendly")
         if valid.empty:
@@ -618,27 +765,35 @@ def page_force_reactivity(metrics_df):
             render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
 
             st.markdown("### Recomendación automática")
-            st.info(f"Prioridad principal para **{selected_player}**: **{force_profile_priority(row['perfil_fr'])}**.")
+            balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
+            st.info(f"Prioridad principal para **{selected_player}**: **{action_priority_label(row['perfil_fr'], balance_label)}**.")
 
-            st.markdown("### Ranking rápido")
-            r1, r2 = st.columns(2)
-            with r1:
+            st.markdown("### Rankings rápidos")
+            rr1, rr2 = st.columns(2)
+            with rr1:
                 top_global = valid.sort_values("score_fr", ascending=False)[["Jugador","score_fr"]].head(3).copy()
                 st.markdown("**Top 3 score global**")
                 for i, (_, rr) in enumerate(top_global.iterrows(), start=1):
                     st.markdown(f"{i}. **{rr['Jugador']}** · {rr['score_fr']:.0f}/100")
-            with r2:
-                balanced = valid.assign(balance=(valid["RSI_mod"]/rsi_ref - valid["est_1rm_rel"]/rel_ref).abs() if pd.notna(rsi_ref) and pd.notna(rel_ref) else np.nan)
-                top_bal = balanced.sort_values("balance", ascending=True)[["Jugador","balance"]].head(3).copy()
-                st.markdown("**Top 3 perfiles más equilibrados**")
-                for i, (_, rr) in enumerate(top_bal.iterrows(), start=1):
-                    st.markdown(f"{i}. **{rr['Jugador']}**")
+            with rr2:
+                team_summary = build_team_force_summary(valid, metrics_df, selected_date, rsi_ref, rel_ref)
+                top_bal = team_summary[team_summary["Equilibrio"].isin(["Equilibrado alto","Equilibrado medio"])].copy()
+                top_bal = top_bal.sort_values(["Equilibrio","Score F-R"], ascending=[True, False]).head(3)
+                st.markdown("**Perfiles equilibrados**")
+                if top_bal.empty:
+                    st.markdown("Sin jugadores equilibrados con datos suficientes.")
+                else:
+                    for i, (_, rr) in enumerate(top_bal.iterrows(), start=1):
+                        st.markdown(f"{i}. **{rr['Jugador']}** · {rr['Equilibrio']}")
 
             st.markdown("### Cómo leer el perfil")
             st.markdown(
-                "- **Avión**: alto RSI mod y alta fuerza relativa.\n"
-                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.\n"
-                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.\n"
+                "- **Avión**: alto RSI mod y alta fuerza relativa.
+"
+                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.
+"
+                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.
+"
                 "- **Base por desarrollar**: margen claro en ambas dimensiones."
             )
 
