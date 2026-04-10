@@ -656,6 +656,81 @@ def trend_arrow(curr, prev):
         return "↓"
     return "→"
 
+
+def absolute_rsi_level(rsi):
+    if pd.isna(rsi):
+        return "Sin nivel"
+    if rsi >= 0.65:
+        return "Alto"
+    if rsi >= 0.50:
+        return "Medio"
+    return "Bajo"
+
+def absolute_rel_strength_level(rel):
+    if pd.isna(rel):
+        return "Sin nivel"
+    if rel >= 2.0:
+        return "Alto"
+    if rel >= 1.5:
+        return "Medio"
+    return "Bajo"
+
+def global_absolute_level(rsi, rel):
+    rsi_lvl = absolute_rsi_level(rsi)
+    rel_lvl = absolute_rel_strength_level(rel)
+    if "Sin nivel" in [rsi_lvl, rel_lvl]:
+        return "Sin nivel"
+    if rsi_lvl == "Alto" and rel_lvl == "Alto":
+        return "Alto"
+    if rsi_lvl == "Bajo" and rel_lvl == "Bajo":
+        return "Bajo"
+    return "Medio"
+
+def imbalance_index(rsi, rel, rsi_ref, rel_ref):
+    if pd.isna(rsi) or pd.isna(rel) or pd.isna(rsi_ref) or pd.isna(rel_ref) or rsi_ref <= 0 or rel_ref <= 0:
+        return np.nan
+    z_rsi = rsi / rsi_ref
+    z_rel = rel / rel_ref
+    return abs(z_rsi - z_rel)
+
+def imbalance_label(idx):
+    if pd.isna(idx):
+        return "Sin índice"
+    if idx < 0.10:
+        return "Muy equilibrado"
+    if idx < 0.20:
+        return "Equilibrio aceptable"
+    if idx < 0.35:
+        return "Desequilibrio moderado"
+    return "Desequilibrio alto"
+
+def advanced_priority(profile_name, balance_label, abs_level, idx):
+    if abs_level == "Bajo":
+        return "Fuerza general + potencia básica"
+    if profile_name == "Tanque":
+        return "Fuerza explosiva / RSI"
+    if profile_name == "Elástico":
+        return "Fuerza máxima relativa"
+    if profile_name == "Avión" and (pd.isna(idx) or idx < 0.20):
+        return "Mantener / afinar"
+    if "Equilibrado" in str(balance_label) and abs_level == "Medio":
+        return "Optimizar sin desequilibrar"
+    if profile_name == "Base por desarrollar":
+        return "Base de fuerza + reactividad"
+    return "Ajuste individual"
+
+def team_force_reading_text(team_summary):
+    if team_summary.empty:
+        return "Sin datos suficientes para una lectura colectiva."
+    priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
+    priorities = team_summary[priority_col].value_counts()
+    top_priority = priorities.index[0] if not priorities.empty else "sin prioridad dominante"
+    balance = team_summary["Equilibrio"].value_counts()
+    top_balance = balance.index[0] if not balance.empty else "sin patrón dominante"
+    mean_score = team_summary["Score F-R"].dropna().mean() if "Score F-R" in team_summary.columns else np.nan
+    score_txt = f"{mean_score:.0f}/100" if pd.notna(mean_score) else "sin score"
+    return f"El grupo presenta principalmente un patrón {top_balance}, con una prioridad dominante de {top_priority}. El score medio colectivo es {score_txt}."
+
 def build_team_force_summary(valid_df, metrics_df, selected_date, rsi_ref, rel_ref):
     rows = []
     for _, row in valid_df.iterrows():
