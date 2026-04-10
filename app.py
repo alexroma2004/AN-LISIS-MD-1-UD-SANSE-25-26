@@ -141,6 +141,25 @@ st.markdown("""
     display:inline-block; padding:5px 10px; border-radius:999px; font-weight:700; font-size:0.78rem;
     background:#EEF2FF; color:#1D4ED8; margin-right:6px; margin-top:4px;
 }
+.summary-strip {
+    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin:8px 0 14px 0;
+}
+.summary-tile {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:14px 16px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+}
+.summary-tile .top {font-size:0.78rem; color:#667085; font-weight:700;}
+.summary-tile .big {font-size:1.6rem; font-weight:900; color:#101828; line-height:1.1; margin-top:4px;}
+.summary-tile .sub {font-size:0.82rem; color:#667085; margin-top:4px;}
+.mini-section {
+    background:#FFFFFF; border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:16px 18px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.06); margin-bottom:12px;
+}
+.quick-chip {
+    display:inline-block; padding:6px 10px; border-radius:999px; font-weight:800; font-size:0.78rem;
+    margin-right:6px; margin-bottom:6px; color:white;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -659,6 +678,105 @@ def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None,
     return fig
 
 
+
+def render_team_summary_tiles(team_summary):
+    if team_summary.empty:
+        return
+    top_score = team_summary.sort_values("Score F-R", ascending=False).iloc[0]
+    top_balance = team_summary[team_summary["Equilibrio"].isin(["Equilibrado alto","Equilibrado medio"])]
+    top_balance_name = top_balance.iloc[0]["Jugador"] if not top_balance.empty else "—"
+    top_priority = team_summary["Prioridad"].value_counts().idxmax() if not team_summary["Prioridad"].empty else "—"
+    mean_score = team_summary["Score F-R"].dropna().mean() if "Score F-R" in team_summary.columns else np.nan
+    html = f"""
+    <div class="summary-strip">
+        <div class="summary-tile">
+            <div class="top">Mejor score global</div>
+            <div class="big">{top_score['Jugador']}</div>
+            <div class="sub">{top_score['Score F-R']:.0f}/100 · {top_score['Perfil']}</div>
+        </div>
+        <div class="summary-tile">
+            <div class="top">Media del equipo</div>
+            <div class="big">{mean_score:.0f}/100</div>
+            <div class="sub">score fuerza-reactividad</div>
+        </div>
+        <div class="summary-tile">
+            <div class="top">Perfil equilibrado destacado</div>
+            <div class="big">{top_balance_name}</div>
+            <div class="sub">equilibrio más consistente</div>
+        </div>
+        <div class="summary-tile">
+            <div class="top">Prioridad dominante</div>
+            <div class="big">{top_priority}</div>
+            <div class="sub">lectura rápida del grupo</div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+def plot_team_priority_bar(team_summary):
+    counts = team_summary["Prioridad"].value_counts().reset_index()
+    counts.columns = ["Prioridad","Jugadores"]
+    fig = px.bar(
+        counts,
+        x="Prioridad",
+        y="Jugadores",
+        text="Jugadores",
+        title="Prioridades de trabajo del grupo"
+    )
+    fig.update_traces(textposition="outside")
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), xaxis_title="", yaxis_title="Jugadores")
+    return fig
+
+def plot_balance_donut(team_summary):
+    counts = team_summary["Equilibrio"].value_counts().reset_index()
+    counts.columns = ["Equilibrio","Jugadores"]
+    fig = px.pie(
+        counts,
+        names="Equilibrio",
+        values="Jugadores",
+        hole=0.55,
+        title="Distribución del equilibrio del equipo"
+    )
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), legend_title="")
+    return fig
+
+def style_team_summary(df):
+    def color_priority(val):
+        colors = {
+            "Mantener":"background-color: rgba(22,163,74,0.16); color:#166534; font-weight:700;",
+            "Ajustar":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Potenciar reactividad":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Potenciar fuerza":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
+            "Desarrollo global":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    def color_profile(val):
+        colors = {
+            "Avión":"background-color: rgba(37,99,235,0.14); color:#1D4ED8; font-weight:700;",
+            "Tanque":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Elástico":"background-color: rgba(5,150,105,0.14); color:#047857; font-weight:700;",
+            "Base por desarrollar":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    def color_balance(val):
+        colors = {
+            "Equilibrado alto":"background-color: rgba(22,163,74,0.14); color:#166534; font-weight:700;",
+            "Equilibrado medio":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Equilibrado bajo":"background-color: rgba(245,158,11,0.16); color:#B45309; font-weight:700;",
+            "Desequilibrado reactivo":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Desequilibrado fuerza":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
+        }
+        return colors.get(val, "")
+    styler = df.style.format({
+        "Score F-R":"{:.1f}",
+        "RSI mod":"{:.3f}",
+        "1RM relativa (kg/kg)":"{:.2f}",
+    })
+    styler = styler.map(color_profile, subset=["Perfil"])
+    styler = styler.map(color_balance, subset=["Equilibrio"])
+    styler = styler.map(color_priority, subset=["Prioridad"])
+    return styler
+
 def page_force_reactivity(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -732,26 +850,36 @@ def page_force_reactivity(metrics_df):
                 key="fr_sort_team"
             )
             ascending = sort_by in ["Jugador", "Perfil", "Equilibrio", "Prioridad"]
+            render_team_summary_tiles(team_summary)
+
+            cvis1, cvis2 = st.columns([1,1], gap="large")
+            with cvis1:
+                st.plotly_chart(plot_balance_donut(team_summary), use_container_width=True)
+            with cvis2:
+                st.plotly_chart(plot_team_priority_bar(team_summary), use_container_width=True)
+
+            st.markdown("### Tabla-resumen visual")
             st.dataframe(
-                team_summary.sort_values(sort_by, ascending=ascending),
+                style_team_summary(team_summary.sort_values(sort_by, ascending=ascending)),
                 use_container_width=True,
                 hide_index=True
             )
 
-            st.markdown("### Resumen de perfiles")
-            s1, s2, s3 = st.columns(3)
-            with s1:
-                balance_counts = team_summary["Equilibrio"].value_counts()
-                for label in ["Equilibrado alto", "Equilibrado medio", "Equilibrado bajo"]:
-                    kpi(label, int(balance_counts.get(label, 0)), "jugadores")
-            with s2:
-                for label in ["Desequilibrado reactivo", "Desequilibrado fuerza"]:
-                    kpi(label, int(balance_counts.get(label, 0)), "jugadores")
-            with s3:
-                priority_counts = team_summary["Prioridad"].value_counts()
-                for label in ["Mantener", "Ajustar", "Potenciar reactividad", "Potenciar fuerza", "Desarrollo global"]:
-                    if label in priority_counts.index:
-                        kpi(label, int(priority_counts.get(label, 0)), "prioridad")
+            st.markdown("### Lectura rápida del grupo")
+            balance_counts = team_summary["Equilibrio"].value_counts()
+            priority_counts = team_summary["Prioridad"].value_counts()
+            chips = []
+            for label in ["Equilibrado alto", "Equilibrado medio", "Equilibrado bajo", "Desequilibrado reactivo", "Desequilibrado fuerza"]:
+                n = int(balance_counts.get(label, 0))
+                if n > 0:
+                    color = "#166534" if "alto" in label else "#1D4ED8" if "medio" in label else "#B45309" if "bajo" in label else "#6D28D9" if "reactivo" in label else "#C2410C"
+                    chips.append(f'<span class="quick-chip" style="background:{color};">{label}: {n}</span>')
+            for label in ["Mantener", "Ajustar", "Potenciar reactividad", "Potenciar fuerza", "Desarrollo global"]:
+                n = int(priority_counts.get(label, 0))
+                if n > 0:
+                    color = "#166534" if label=="Mantener" else "#1D4ED8" if label=="Ajustar" else "#6D28D9" if label=="Potenciar reactividad" else "#C2410C" if label=="Potenciar fuerza" else "#B91C1C"
+                    chips.append(f'<span class="quick-chip" style="background:{color};">{label}: {n}</span>')
+            st.markdown("".join(chips), unsafe_allow_html=True)
 
     with right:
         st.markdown("### Vista jugador-friendly")
