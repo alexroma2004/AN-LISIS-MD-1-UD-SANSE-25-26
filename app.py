@@ -142,23 +142,78 @@ st.markdown("""
     background:#EEF2FF; color:#1D4ED8; margin-right:6px; margin-top:4px;
 }
 .summary-strip {
-    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin:8px 0 14px 0;
+    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:14px; margin:8px 0 16px 0;
 }
 .summary-tile {
-    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
-    border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:14px 16px;
-    box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 55%, #2563EB 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 22px;
+    padding: 16px 18px 16px 18px;
+    box-shadow: 0 16px 34px rgba(15,23,42,0.18);
 }
-.summary-tile .top {font-size:0.78rem; color:#667085; font-weight:700;}
-.summary-tile .big {font-size:1.6rem; font-weight:900; color:#101828; line-height:1.1; margin-top:4px;}
-.summary-tile .sub {font-size:0.82rem; color:#667085; margin-top:4px;}
-.mini-section {
-    background:#FFFFFF; border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:16px 18px;
-    box-shadow: 0 8px 20px rgba(15,23,42,0.06); margin-bottom:12px;
+.summary-tile::after {
+    content: "";
+    position: absolute;
+    top: -30px;
+    right: -20px;
+    width: 90px;
+    height: 90px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.10);
+}
+.summary-tile .icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background: rgba(255,255,255,0.12);
+    font-size: 1rem;
+    margin-bottom: 10px;
+}
+.summary-tile .top {font-size:0.78rem; color:rgba(255,255,255,0.78); font-weight:700;}
+.summary-tile .big {font-size:1.72rem; font-weight:900; color:#FFFFFF; line-height:1.06; margin-top:4px;}
+.summary-tile .sub {font-size:0.84rem; color:rgba(255,255,255,0.84); margin-top:6px; line-height:1.3;}
+.premium-panel {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border:1px solid rgba(15,23,42,0.08);
+    border-radius:22px;
+    padding:16px 18px;
+    box-shadow: 0 10px 26px rgba(15,23,42,0.08);
+    margin-bottom:12px;
+}
+.premium-heading {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:1rem;
+    font-weight:900;
+    color:#0F172A;
+    margin-bottom:12px;
+}
+.premium-heading .dot {
+    width:10px;
+    height:10px;
+    border-radius:999px;
+    background:#2563EB;
+    box-shadow: 0 0 0 6px rgba(37,99,235,0.12);
 }
 .quick-chip {
-    display:inline-block; padding:6px 10px; border-radius:999px; font-weight:800; font-size:0.78rem;
-    margin-right:6px; margin-bottom:6px; color:white;
+    display:inline-block; padding:7px 11px; border-radius:999px; font-weight:800; font-size:0.79rem;
+    margin-right:8px; margin-bottom:8px; color:white; box-shadow: 0 6px 16px rgba(15,23,42,0.10);
+}
+.soft-note {
+    background:#EFF6FF;
+    border:1px solid #DBEAFE;
+    color:#1D4ED8;
+    border-radius:16px;
+    padding:12px 14px;
+    font-size:0.9rem;
+    font-weight:700;
+    margin-top:10px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -690,24 +745,28 @@ def render_team_summary_tiles(team_summary):
     html = f"""
     <div class="summary-strip">
         <div class="summary-tile">
+            <div class="icon">🏆</div>
             <div class="top">Mejor score global</div>
             <div class="big">{top_score['Jugador']}</div>
             <div class="sub">{top_score['Score F-R']:.0f}/100 · {top_score['Perfil']}</div>
         </div>
         <div class="summary-tile">
+            <div class="icon">📈</div>
             <div class="top">Media del equipo</div>
             <div class="big">{mean_score:.0f}/100</div>
-            <div class="sub">score fuerza-reactividad</div>
+            <div class="sub">score fuerza-reactividad del grupo</div>
         </div>
         <div class="summary-tile">
-            <div class="top">Perfil equilibrado destacado</div>
+            <div class="icon">⚖️</div>
+            <div class="top">Equilibrio destacado</div>
             <div class="big">{top_balance_name}</div>
-            <div class="sub">equilibrio más consistente</div>
+            <div class="sub">perfil más consistente del día</div>
         </div>
         <div class="summary-tile">
+            <div class="icon">🎯</div>
             <div class="top">Prioridad dominante</div>
             <div class="big">{top_priority}</div>
-            <div class="sub">lectura rápida del grupo</div>
+            <div class="sub">tendencia principal del grupo</div>
         </div>
     </div>
     """
@@ -821,7 +880,7 @@ def page_force_reactivity(metrics_df):
 
     left, right = st.columns([1.55, 1], gap="large")
     with left:
-        st.markdown("### Scatter colectivo")
+        st.markdown('<div class="premium-heading"><span class="dot"></span><span>Scatter colectivo</span></div>', unsafe_allow_html=True)
         filter_col1, filter_col2 = st.columns([1.5, 1])
         with filter_col1:
             selected_profiles = st.multiselect(
@@ -833,16 +892,18 @@ def page_force_reactivity(metrics_df):
         with filter_col2:
             show_names = st.toggle("Mostrar nombres", value=True, key="fr_show_names")
 
+        st.markdown('<div class="premium-panel">', unsafe_allow_html=True)
         st.plotly_chart(
             plot_force_reactivity_filtered(fr_df, rsi_ref, rel_ref, selected_profiles=selected_profiles, show_names=show_names),
             use_container_width=True
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
         if not valid.empty:
             valid["score_fr"] = valid.apply(lambda r: force_profile_score(r.get("RSI_mod"), r.get("est_1rm_rel"), rsi_ref, rel_ref), axis=1)
             team_summary = build_team_force_summary(valid, metrics_df, selected_date, rsi_ref, rel_ref)
 
-            st.markdown("### Panel colectivo del equipo")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Panel colectivo del equipo</span></div>', unsafe_allow_html=True)
             sort_by = st.selectbox(
                 "Ordenar tabla por",
                 ["Score F-R", "Jugador", "Perfil", "Equilibrio", "Prioridad"],
@@ -854,18 +915,24 @@ def page_force_reactivity(metrics_df):
 
             cvis1, cvis2 = st.columns([1,1], gap="large")
             with cvis1:
+                st.markdown('<div class="premium-panel">', unsafe_allow_html=True)
                 st.plotly_chart(plot_balance_donut(team_summary), use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
             with cvis2:
+                st.markdown('<div class="premium-panel">', unsafe_allow_html=True)
                 st.plotly_chart(plot_team_priority_bar(team_summary), use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
-            st.markdown("### Tabla-resumen visual")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Tabla-resumen visual</span></div>', unsafe_allow_html=True)
+            st.markdown('<div class="premium-panel">', unsafe_allow_html=True)
             st.dataframe(
                 style_team_summary(team_summary.sort_values(sort_by, ascending=ascending)),
                 use_container_width=True,
                 hide_index=True
             )
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            st.markdown("### Lectura rápida del grupo")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Lectura rápida del grupo</span></div>', unsafe_allow_html=True)
             balance_counts = team_summary["Equilibrio"].value_counts()
             priority_counts = team_summary["Prioridad"].value_counts()
             chips = []
@@ -879,10 +946,10 @@ def page_force_reactivity(metrics_df):
                 if n > 0:
                     color = "#166534" if label=="Mantener" else "#1D4ED8" if label=="Ajustar" else "#6D28D9" if label=="Potenciar reactividad" else "#C2410C" if label=="Potenciar fuerza" else "#B91C1C"
                     chips.append(f'<span class="quick-chip" style="background:{color};">{label}: {n}</span>')
-            st.markdown("".join(chips), unsafe_allow_html=True)
+            st.markdown(f'<div class="premium-panel">{"".join(chips)}</div>', unsafe_allow_html=True)
 
     with right:
-        st.markdown("### Vista jugador-friendly")
+        st.markdown('<div class="premium-heading"><span class="dot"></span><span>Vista jugador-friendly</span></div>', unsafe_allow_html=True)
         if valid.empty:
             st.info("No hay suficientes datos para generar tarjetas individuales.")
         else:
@@ -892,11 +959,11 @@ def page_force_reactivity(metrics_df):
             row = valid[valid["Jugador"] == selected_player].iloc[0]
             render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=metrics_df, selected_date=selected_date)
 
-            st.markdown("### Recomendación automática")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Recomendación automática</span></div>', unsafe_allow_html=True)
             balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
-            st.info(f"Prioridad principal para **{selected_player}**: **{action_priority_label(row['perfil_fr'], balance_label)}**.")
+            st.markdown(f'<div class="soft-note">Prioridad principal para <b>{selected_player}</b>: <b>{action_priority_label(row["perfil_fr"], balance_label)}</b>.</div>', unsafe_allow_html=True)
 
-            st.markdown("### Rankings rápidos")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Rankings rápidos</span></div>', unsafe_allow_html=True)
             rr1, rr2 = st.columns(2)
             with rr1:
                 top_global = valid.sort_values("score_fr", ascending=False)[["Jugador","score_fr"]].head(3).copy()
@@ -914,7 +981,7 @@ def page_force_reactivity(metrics_df):
                     for i, (_, rr) in enumerate(top_bal.iterrows(), start=1):
                         st.markdown(f"{i}. **{rr['Jugador']}** · {rr['Equilibrio']}")
 
-            st.markdown("### Cómo leer el perfil")
+            st.markdown('<div class="premium-heading"><span class="dot"></span><span>Cómo leer el perfil</span></div>', unsafe_allow_html=True)
             st.markdown(
                 "- **Avión**: alto RSI mod y alta fuerza relativa.\n"
                 "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.\n"
