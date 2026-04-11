@@ -205,6 +205,23 @@ st.markdown("""
     display:inline-block; padding:7px 11px; border-radius:999px; font-weight:800; font-size:0.79rem;
     margin-right:8px; margin-bottom:8px; color:white; box-shadow: 0 6px 16px rgba(15,23,42,0.10);
 }
+
+.results-grid {
+    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin:10px 0 14px 0;
+}
+.result-card {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border:1px solid rgba(15,23,42,0.08);
+    border-radius:20px;
+    padding:14px 16px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+}
+.result-card .lab {font-size:0.78rem; color:#667085; font-weight:700;}
+.result-card .big {font-size:1.5rem; color:#101828; font-weight:900; margin-top:4px; line-height:1.05;}
+.result-card .mini {font-size:0.80rem; color:#475467; margin-top:6px; line-height:1.35;}
+.result-up {color:#15803D; font-weight:800;}
+.result-down {color:#C2410C; font-weight:800;}
+.result-neutral {color:#334155; font-weight:800;}
 .soft-note {
     background:#EFF6FF;
     border:1px solid #DBEAFE;
@@ -569,15 +586,12 @@ def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_d
     player = row.get("Jugador", "Jugador")
 
     prev_row = latest_previous_player_row(metrics_df, player, selected_date) if metrics_df is not None and selected_date is not None else None
+    ctx_ma3 = player_ma3_context(metrics_df, player, selected_date) if metrics_df is not None and selected_date is not None else {}
     prev_rsi = prev_row["RSI_mod"] if prev_row is not None and "RSI_mod" in prev_row else np.nan
     prev_vmp = prev_row["VMP"] if prev_row is not None and "VMP" in prev_row else np.nan
     score = force_profile_score(rsi, rel, rsi_ref, rel_ref)
     strength_1, strength_2 = force_profile_strengths(profile)
-    balance_label = classify_balance_level(rsi, rel, rsi_ref, rel_ref)
-    idx = imbalance_index(rsi, rel, rsi_ref, rel_ref)
-    idx_label = imbalance_label(idx)
-    abs_level = global_absolute_level(rsi, rel)
-    adv_priority = advanced_priority(profile, balance_label, abs_level, idx)
+    priority = force_profile_priority(profile)
 
     def fnum(x, d=2):
         return "—" if pd.isna(x) else f"{x:.{d}f}"
@@ -591,7 +605,7 @@ def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_d
         <div class="mini-grid">
             <div class="mini-stat"><div class="lab">RSI mod</div><div class="val">{fnum(rsi,3)}</div><div class="lab">vs última: {compact_delta(rsi, prev_rsi, 3)}</div></div>
             <div class="mini-stat"><div class="lab">1RM relativa</div><div class="val">{fnum(rel,2)} kg/kg</div><div class="lab">vs equipo: {fr_delta_text(rel, rel_ref, 2)}</div></div>
-            <div class="mini-stat"><div class="lab">Nivel absoluto</div><div class="val">{abs_level}</div><div class="lab">{idx_label}</div></div>
+            <div class="mini-stat"><div class="lab">1RM estimada</div><div class="val">{fnum(est,1)} kg</div><div class="lab">estimación</div></div>
             <div class="mini-stat"><div class="lab">VMP</div><div class="val">{fnum(vmp,3)} m/s</div><div class="lab">vs última: {compact_delta(vmp, prev_vmp, 3, " m/s")}</div></div>
         </div>
     </div>
@@ -602,17 +616,17 @@ def render_force_profile_card(row, rsi_ref, rel_ref, metrics_df=None, selected_d
     with t1:
         st.markdown(f'<span class="tag-soft">Fortaleza 1: {strength_1}</span>', unsafe_allow_html=True)
         st.markdown(f'<span class="tag-soft">Fortaleza 2: {strength_2}</span>', unsafe_allow_html=True)
-        st.markdown(f'<span class="tag-soft">Prioridad: {adv_priority}</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="tag-soft">Prioridad: {priority}</span>', unsafe_allow_html=True)
     with t2:
         tags = []
         if pd.notna(peso): tags.append(f'<span class="tag-soft">Peso corporal: {peso:.1f} kg</span>')
         if pd.notna(carga): tags.append(f'<span class="tag-soft">Carga sentadilla: {carga:.1f} kg</span>')
-        if pd.notna(idx): tags.append(f'<span class="tag-soft">Índice desequilibrio: {idx:.3f}</span>')
+        if pd.notna(ctx_ma3.get("RSI_mod_ma3", np.nan)): tags.append(f'<span class="tag-soft">RSI MA3: {ctx_ma3["RSI_mod_ma3"]:.3f}</span>')
         if pd.notna(score): tags.append(f'<span class="tag-soft">Score F-R: {score:.0f}/100 · {score_label(score)}</span>')
         for tag in tags:
             st.markdown(tag, unsafe_allow_html=True)
 
-    st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)} El nivel absoluto actual se interpreta como <b>{abs_level}</b> y la prioridad práctica es <b>{adv_priority}</b>.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="player-msg">{build_force_profile_message(row, rsi_ref, rel_ref)}</div>', unsafe_allow_html=True)
 
 
 def classify_balance_level(rsi, rel, rsi_ref, rel_ref):
@@ -622,6 +636,7 @@ def classify_balance_level(rsi, rel, rsi_ref, rel_ref):
     nf = rel / rel_ref
     diff = abs(nr - nf)
     mean_level = (nr + nf) / 2
+
     if diff <= 0.10:
         if mean_level >= 1.05:
             return "Equilibrado alto"
@@ -630,7 +645,10 @@ def classify_balance_level(rsi, rel, rsi_ref, rel_ref):
         else:
             return "Equilibrado bajo"
     else:
-        return "Desequilibrado reactivo" if nr > nf else "Desequilibrado fuerza"
+        if nr > nf:
+            return "Desequilibrado reactivo"
+        else:
+            return "Desequilibrado fuerza"
 
 def action_priority_label(profile_name, balance_label):
     if balance_label == "Equilibrado alto":
@@ -656,81 +674,6 @@ def trend_arrow(curr, prev):
         return "↓"
     return "→"
 
-
-def absolute_rsi_level(rsi):
-    if pd.isna(rsi):
-        return "Sin nivel"
-    if rsi >= 0.65:
-        return "Alto"
-    if rsi >= 0.50:
-        return "Medio"
-    return "Bajo"
-
-def absolute_rel_strength_level(rel):
-    if pd.isna(rel):
-        return "Sin nivel"
-    if rel >= 2.0:
-        return "Alto"
-    if rel >= 1.5:
-        return "Medio"
-    return "Bajo"
-
-def global_absolute_level(rsi, rel):
-    rsi_lvl = absolute_rsi_level(rsi)
-    rel_lvl = absolute_rel_strength_level(rel)
-    if "Sin nivel" in [rsi_lvl, rel_lvl]:
-        return "Sin nivel"
-    if rsi_lvl == "Alto" and rel_lvl == "Alto":
-        return "Alto"
-    if rsi_lvl == "Bajo" and rel_lvl == "Bajo":
-        return "Bajo"
-    return "Medio"
-
-def imbalance_index(rsi, rel, rsi_ref, rel_ref):
-    if pd.isna(rsi) or pd.isna(rel) or pd.isna(rsi_ref) or pd.isna(rel_ref) or rsi_ref <= 0 or rel_ref <= 0:
-        return np.nan
-    z_rsi = rsi / rsi_ref
-    z_rel = rel / rel_ref
-    return abs(z_rsi - z_rel)
-
-def imbalance_label(idx):
-    if pd.isna(idx):
-        return "Sin índice"
-    if idx < 0.10:
-        return "Muy equilibrado"
-    if idx < 0.20:
-        return "Equilibrio aceptable"
-    if idx < 0.35:
-        return "Desequilibrio moderado"
-    return "Desequilibrio alto"
-
-def advanced_priority(profile_name, balance_label, abs_level, idx):
-    if abs_level == "Bajo":
-        return "Fuerza general + potencia básica"
-    if profile_name == "Tanque":
-        return "Fuerza explosiva / RSI"
-    if profile_name == "Elástico":
-        return "Fuerza máxima relativa"
-    if profile_name == "Avión" and (pd.isna(idx) or idx < 0.20):
-        return "Mantener / afinar"
-    if "Equilibrado" in str(balance_label) and abs_level == "Medio":
-        return "Optimizar sin desequilibrar"
-    if profile_name == "Base por desarrollar":
-        return "Base de fuerza + reactividad"
-    return "Ajuste individual"
-
-def team_force_reading_text(team_summary):
-    if team_summary.empty:
-        return "Sin datos suficientes para una lectura colectiva."
-    priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
-    priorities = team_summary[priority_col].value_counts()
-    top_priority = priorities.index[0] if not priorities.empty else "sin prioridad dominante"
-    balance = team_summary["Equilibrio"].value_counts()
-    top_balance = balance.index[0] if not balance.empty else "sin patrón dominante"
-    mean_score = team_summary["Score F-R"].dropna().mean() if "Score F-R" in team_summary.columns else np.nan
-    score_txt = f"{mean_score:.0f}/100" if pd.notna(mean_score) else "sin score"
-    return f"El grupo presenta principalmente un patrón {top_balance}, con una prioridad dominante de {top_priority}. El score medio colectivo es {score_txt}."
-
 def build_team_force_summary(valid_df, metrics_df, selected_date, rsi_ref, rel_ref):
     rows = []
     for _, row in valid_df.iterrows():
@@ -741,33 +684,18 @@ def build_team_force_summary(valid_df, metrics_df, selected_date, rsi_ref, rel_r
         if prev is not None:
             prev_est_1rm = estimate_1rm_from_load_vmp(row.get("Carga_sentadilla"), prev.get("VMP"))
         prev_rel = prev_est_1rm / row["Peso_corporal"] if pd.notna(prev_est_1rm) and pd.notna(row.get("Peso_corporal")) and row.get("Peso_corporal") > 0 else np.nan
-
         score = force_profile_score(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
         balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
-        idx = imbalance_index(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
-        idx_label = imbalance_label(idx)
-        abs_level = global_absolute_level(row.get("RSI_mod"), row.get("est_1rm_rel"))
-        state_txt = "Estable"
-        if pd.notna(prev_rsi):
-            if row["RSI_mod"] > prev_rsi:
-                state_txt = "Mejorando"
-            elif row["RSI_mod"] < prev_rsi:
-                state_txt = "Bajando"
-
         rows.append({
             "Jugador": row["Jugador"],
             "Perfil": row["perfil_fr"],
             "Equilibrio": balance_label,
-            "Nivel absoluto": abs_level,
-            "Índice desequilibrio": round(idx, 3) if pd.notna(idx) else np.nan,
-            "Lectura desequilibrio": idx_label,
             "Score F-R": round(score, 1) if pd.notna(score) else np.nan,
             "RSI mod": row["RSI_mod"],
             "1RM relativa (kg/kg)": row["est_1rm_rel"],
             "Cambio RSI": trend_arrow(row["RSI_mod"], prev_rsi),
             "Cambio 1RM rel": trend_arrow(row["est_1rm_rel"], prev_rel),
-            "Estado actual": state_txt,
-            "Prioridad avanzada": advanced_priority(row["perfil_fr"], balance_label, abs_level, idx),
+            "Prioridad": action_priority_label(row["perfil_fr"], balance_label),
         })
     return pd.DataFrame(rows)
 
@@ -821,14 +749,15 @@ def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None,
     fig.update_layout(title="RSI modificado vs 1RM relativa estimada", height=560, margin=dict(l=10, r=10, t=45, b=10), legend_title="Perfil")
     return fig
 
+
+
 def render_team_summary_tiles(team_summary):
     if team_summary.empty:
         return
     top_score = team_summary.sort_values("Score F-R", ascending=False).iloc[0]
     top_balance = team_summary[team_summary["Equilibrio"].isin(["Equilibrado alto","Equilibrado medio"])]
     top_balance_name = top_balance.iloc[0]["Jugador"] if not top_balance.empty else "—"
-    top_priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
-    top_priority = team_summary[top_priority_col].value_counts().idxmax() if not team_summary[top_priority_col].empty else "—"
+    top_priority = team_summary["Prioridad"].value_counts().idxmax() if not team_summary["Prioridad"].empty else "—"
     mean_score = team_summary["Score F-R"].dropna().mean() if "Score F-R" in team_summary.columns else np.nan
     html = f"""
     <div class="summary-strip">
@@ -861,10 +790,15 @@ def render_team_summary_tiles(team_summary):
     st.markdown(html, unsafe_allow_html=True)
 
 def plot_team_priority_bar(team_summary):
-    priority_col = "Prioridad avanzada" if "Prioridad avanzada" in team_summary.columns else "Prioridad"
-    counts = team_summary[priority_col].value_counts().reset_index()
+    counts = team_summary["Prioridad"].value_counts().reset_index()
     counts.columns = ["Prioridad","Jugadores"]
-    fig = px.bar(counts, x="Prioridad", y="Jugadores", text="Jugadores", title="Prioridades de trabajo del grupo")
+    fig = px.bar(
+        counts,
+        x="Prioridad",
+        y="Jugadores",
+        text="Jugadores",
+        title="Prioridades de trabajo del grupo"
+    )
     fig.update_traces(textposition="outside")
     fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), xaxis_title="", yaxis_title="Jugadores")
     return fig
@@ -872,20 +806,24 @@ def plot_team_priority_bar(team_summary):
 def plot_balance_donut(team_summary):
     counts = team_summary["Equilibrio"].value_counts().reset_index()
     counts.columns = ["Equilibrio","Jugadores"]
-    fig = px.pie(counts, names="Equilibrio", values="Jugadores", hole=0.55, title="Distribución del equilibrio del equipo")
+    fig = px.pie(
+        counts,
+        names="Equilibrio",
+        values="Jugadores",
+        hole=0.55,
+        title="Distribución del equilibrio del equipo"
+    )
     fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), legend_title="")
     return fig
 
 def style_team_summary(df):
     def color_priority(val):
         colors = {
-            "Mantener / afinar":"background-color: rgba(22,163,74,0.16); color:#166534; font-weight:700;",
-            "Optimizar sin desequilibrar":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
-            "Fuerza explosiva / RSI":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
-            "Fuerza máxima relativa":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
-            "Fuerza general + potencia básica":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
-            "Base de fuerza + reactividad":"background-color: rgba(217,119,6,0.14); color:#B45309; font-weight:700;",
-            "Ajuste individual":"background-color: rgba(71,85,105,0.14); color:#334155; font-weight:700;",
+            "Mantener":"background-color: rgba(22,163,74,0.16); color:#166534; font-weight:700;",
+            "Ajustar":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
+            "Potenciar reactividad":"background-color: rgba(124,58,237,0.14); color:#6D28D9; font-weight:700;",
+            "Potenciar fuerza":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
+            "Desarrollo global":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
         }
         return colors.get(val, "")
     def color_profile(val):
@@ -905,29 +843,14 @@ def style_team_summary(df):
             "Desequilibrado fuerza":"background-color: rgba(234,88,12,0.14); color:#C2410C; font-weight:700;",
         }
         return colors.get(val, "")
-    def color_level(val):
-        colors = {
-            "Alto":"background-color: rgba(22,163,74,0.14); color:#166534; font-weight:700;",
-            "Medio":"background-color: rgba(59,130,246,0.14); color:#1D4ED8; font-weight:700;",
-            "Bajo":"background-color: rgba(220,38,38,0.14); color:#B91C1C; font-weight:700;",
-        }
-        return colors.get(val, "")
     styler = df.style.format({
         "Score F-R":"{:.1f}",
         "RSI mod":"{:.3f}",
         "1RM relativa (kg/kg)":"{:.2f}",
-        "Índice desequilibrio":"{:.3f}",
     })
-    if "Perfil" in df.columns:
-        styler = styler.map(color_profile, subset=["Perfil"])
-    if "Equilibrio" in df.columns:
-        styler = styler.map(color_balance, subset=["Equilibrio"])
-    if "Nivel absoluto" in df.columns:
-        styler = styler.map(color_level, subset=["Nivel absoluto"])
-    if "Prioridad avanzada" in df.columns:
-        styler = styler.map(color_priority, subset=["Prioridad avanzada"])
-    elif "Prioridad" in df.columns:
-        styler = styler.map(color_priority, subset=["Prioridad"])
+    styler = styler.map(color_profile, subset=["Perfil"])
+    styler = styler.map(color_balance, subset=["Equilibrio"])
+    styler = styler.map(color_priority, subset=["Prioridad"])
     return styler
 
 def page_force_reactivity(metrics_df):
@@ -1000,11 +923,11 @@ def page_force_reactivity(metrics_df):
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Panel colectivo del equipo</span></div>', unsafe_allow_html=True)
             sort_by = st.selectbox(
                 "Ordenar tabla por",
-                ["Score F-R", "Jugador", "Perfil", "Equilibrio", "Nivel absoluto", "Prioridad avanzada"],
+                ["Score F-R", "Jugador", "Perfil", "Equilibrio", "Prioridad"],
                 index=0,
                 key="fr_sort_team"
             )
-            ascending = sort_by in ["Jugador", "Perfil", "Equilibrio", "Nivel absoluto", "Prioridad avanzada"]
+            ascending = sort_by in ["Jugador", "Perfil", "Equilibrio", "Prioridad"]
             render_team_summary_tiles(team_summary)
 
             cvis1, cvis2 = st.columns([1,1], gap="large")
@@ -1014,7 +937,7 @@ def page_force_reactivity(metrics_df):
                 st.markdown('</div>', unsafe_allow_html=True)
             with cvis2:
                 st.markdown('<div class="premium-panel">', unsafe_allow_html=True)
-                st.plotly_chart(plot_team_priority_bar(team_summary.rename(columns={"Prioridad avanzada":"Prioridad"})), use_container_width=True)
+                st.plotly_chart(plot_team_priority_bar(team_summary), use_container_width=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Tabla-resumen visual</span></div>', unsafe_allow_html=True)
@@ -1028,7 +951,7 @@ def page_force_reactivity(metrics_df):
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Lectura rápida del grupo</span></div>', unsafe_allow_html=True)
             balance_counts = team_summary["Equilibrio"].value_counts()
-            priority_counts = team_summary["Prioridad avanzada"].value_counts()
+            priority_counts = team_summary["Prioridad"].value_counts()
             chips = []
             for label in ["Equilibrado alto", "Equilibrado medio", "Equilibrado bajo", "Desequilibrado reactivo", "Desequilibrado fuerza"]:
                 n = int(balance_counts.get(label, 0))
@@ -1040,7 +963,7 @@ def page_force_reactivity(metrics_df):
                 if n > 0:
                     color = "#166534" if label=="Mantener" else "#1D4ED8" if label=="Ajustar" else "#6D28D9" if label=="Potenciar reactividad" else "#C2410C" if label=="Potenciar fuerza" else "#B91C1C"
                     chips.append(f'<span class="quick-chip" style="background:{color};">{label}: {n}</span>')
-            st.markdown(f'<div class="premium-panel">{"".join(chips)}<div class="soft-note" style="margin-top:12px;">{team_force_reading_text(team_summary)}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="premium-panel">{"".join(chips)}</div>', unsafe_allow_html=True)
 
     with right:
         st.markdown('<div class="premium-heading"><span class="dot"></span><span>Vista jugador-friendly</span></div>', unsafe_allow_html=True)
@@ -1055,9 +978,7 @@ def page_force_reactivity(metrics_df):
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Recomendación automática</span></div>', unsafe_allow_html=True)
             balance_label = classify_balance_level(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
-            idx = imbalance_index(row.get("RSI_mod"), row.get("est_1rm_rel"), rsi_ref, rel_ref)
-            abs_level = global_absolute_level(row.get("RSI_mod"), row.get("est_1rm_rel"))
-            st.markdown(f'<div class="soft-note">Prioridad principal para <b>{selected_player}</b>: <b>{advanced_priority(row["perfil_fr"], balance_label, abs_level, idx)}</b>.</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="soft-note">Prioridad principal para <b>{selected_player}</b>: <b>{action_priority_label(row["perfil_fr"], balance_label)}</b>.</div>', unsafe_allow_html=True)
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Rankings rápidos</span></div>', unsafe_allow_html=True)
             rr1, rr2 = st.columns(2)
@@ -2144,6 +2065,132 @@ def page_equipo(metrics_df):
         table[col] = table[col].round(2)
     st.dataframe(table.sort_values(["Loss score","Pérdida media %"], ascending=[False, True]), use_container_width=True, hide_index=True)
 
+
+def player_results_reference(player_df, metric):
+    vals = pd.to_numeric(player_df[metric], errors="coerce").dropna()
+    if vals.empty:
+        return {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
+    current = vals.iloc[-1]
+    baseline_col = f"{metric}_baseline"
+    baseline = pd.to_numeric(player_df[baseline_col], errors="coerce").iloc[-1] if baseline_col in player_df.columns else np.nan
+    initial = vals.iloc[0]
+    best = vals.max()
+    return {"current": current, "baseline": baseline, "initial": initial, "best": best}
+
+def pct_change_safe(current, ref):
+    if pd.isna(current) or pd.isna(ref) or ref == 0:
+        return np.nan
+    return (current - ref) / ref * 100.0
+
+def trend_class(pct):
+    if pd.isna(pct):
+        return "result-neutral", "Sin referencia"
+    if pct > 1.0:
+        return "result-up", f"+{pct:.1f}%"
+    if pct < -1.0:
+        return "result-down", f"{pct:.1f}%"
+    return "result-neutral", f"{pct:.1f}%"
+
+def player_estimated_1rm_series(player_df, load_kg):
+    ser = player_df["VMP"].apply(lambda x: estimate_1rm_from_load_vmp(load_kg, x))
+    return pd.to_numeric(ser, errors="coerce")
+
+def render_results_cards(player_df, load_kg):
+    refs = {}
+    for metric in OBJECTIVE_METRICS:
+        refs[metric] = player_results_reference(player_df, metric)
+
+    if pd.notna(load_kg):
+        est_series = player_estimated_1rm_series(player_df, load_kg)
+        refs["1RM_est"] = {
+            "current": est_series.iloc[-1] if not est_series.empty else np.nan,
+            "baseline": est_series.expanding().mean().shift(1).iloc[-1] if len(est_series) > 1 else est_series.mean(),
+            "initial": est_series.dropna().iloc[0] if est_series.dropna().shape[0] else np.nan,
+            "best": est_series.max() if not est_series.empty else np.nan,
+        }
+    else:
+        refs["1RM_est"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
+
+    cards = []
+    order = [("CMJ","cm"), ("RSI_mod",""), ("VMP"," m/s"), ("1RM_est"," kg")]
+    labels = {"CMJ":"CMJ", "RSI_mod":"RSI mod", "VMP":"VMP", "1RM_est":"1RM estimada"}
+    decimals = {"CMJ":1, "RSI_mod":3, "VMP":3, "1RM_est":1}
+
+    for key, suffix in order:
+        ref = refs[key]
+        current = ref["current"]
+        vs_base = pct_change_safe(current, ref["baseline"])
+        vs_initial = pct_change_safe(current, ref["initial"])
+        css_class, txt = trend_class(vs_base)
+        dist_best = pct_change_safe(current, ref["best"])
+        best_text = "—" if pd.isna(ref["best"]) else f"{ref['best']:.{decimals[key]}f}{suffix}"
+        current_text = "—" if pd.isna(current) else f"{current:.{decimals[key]}f}{suffix}"
+        init_text = "—" if pd.isna(vs_initial) else f"{vs_initial:+.1f}%"
+        base_text = "—" if pd.isna(vs_base) else f"{vs_base:+.1f}%"
+        best_gap = "—" if pd.isna(dist_best) else f"{dist_best:+.1f}%"
+        cards.append(f"""
+        <div class="result-card">
+            <div class="lab">{labels[key]}</div>
+            <div class="big">{current_text}</div>
+            <div class="mini"><span class="{css_class}">{txt} vs baseline</span></div>
+            <div class="mini">vs inicio: <b>{init_text}</b></div>
+            <div class="mini">mejor marca: <b>{best_text}</b> · distancia: <b>{best_gap}</b></div>
+        </div>
+        """)
+    st.markdown(f'<div class="results-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+def plot_player_results_trend(player_df, metric, selected_date, load_kg=None):
+    fig = go.Figure()
+    if metric == "1RM_est":
+        if pd.isna(load_kg):
+            fig.update_layout(title="1RM estimada · falta carga de sentadilla", height=280, margin=dict(l=10,r=10,t=40,b=10))
+            return fig
+        y = player_estimated_1rm_series(player_df, load_kg)
+        title = "1RM estimada"
+        y_title = "kg"
+        baseline = y.expanding().mean().shift(1)
+        best_value = y.max()
+    else:
+        y = pd.to_numeric(player_df[metric], errors="coerce")
+        baseline = pd.to_numeric(player_df.get(f"{metric}_baseline"), errors="coerce")
+        title = LABELS.get(metric, metric)
+        y_title = ""
+        best_value = y.max()
+
+    fig.add_trace(go.Scatter(x=player_df["Fecha"], y=y, mode="lines+markers", name="Valor actual", line=dict(width=3)))
+    if baseline is not None is not False:
+        fig.add_trace(go.Scatter(x=player_df["Fecha"], y=baseline, mode="lines", name="Baseline", line=dict(width=2, dash="dot")))
+    if pd.notna(best_value):
+        fig.add_hline(y=float(best_value), line_dash="dash", line_color="#16A34A")
+    sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+    if not sel.empty:
+        sel_idx = sel.index[-1]
+        sel_y = y.loc[sel_idx] if sel_idx in y.index else y.iloc[-1]
+        fig.add_trace(go.Scatter(x=[sel["Fecha"].iloc[-1]], y=[sel_y], mode="markers", name="Fecha", marker=dict(size=12, color="#C62828", symbol="diamond")))
+    fig.update_layout(title=title, height=280, margin=dict(l=10,r=10,t=40,b=10), yaxis_title=y_title)
+    return fig
+
+def results_summary_text(player_df, load_kg=None):
+    msgs = []
+    for metric in OBJECTIVE_METRICS:
+        ref = player_results_reference(player_df, metric)
+        pct = pct_change_safe(ref["current"], ref["baseline"])
+        if pd.notna(pct):
+            msgs.append((metric, pct))
+    if pd.notna(load_kg):
+        est_series = player_estimated_1rm_series(player_df, load_kg)
+        if not est_series.dropna().empty:
+            baseline = est_series.expanding().mean().shift(1).iloc[-1] if len(est_series) > 1 else est_series.mean()
+            pct = pct_change_safe(est_series.iloc[-1], baseline)
+            if pd.notna(pct):
+                msgs.append(("1RM_est", pct))
+    if not msgs:
+        return "Sin datos suficientes para resumir la evolución del jugador."
+    msgs_sorted = sorted(msgs, key=lambda x: x[1], reverse=True)
+    best_metric, best_pct = msgs_sorted[0]
+    worst_metric, worst_pct = msgs_sorted[-1]
+    return f"Evolución global del jugador: la señal más positiva aparece en {('1RM estimada' if best_metric=='1RM_est' else LABELS.get(best_metric,best_metric))} ({best_pct:+.1f}% vs baseline). La variable más rezagada es {('1RM estimada' if worst_metric=='1RM_est' else LABELS.get(worst_metric,worst_metric))} ({worst_pct:+.1f}% vs baseline)."
+
 def page_jugador(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -2156,14 +2203,21 @@ def page_jugador(metrics_df):
     selected_date = pd.to_datetime(st.selectbox("Fecha del jugador", opts, index=len(opts)-1))
     current = player_df[player_df["Fecha"].dt.normalize() == selected_date.normalize()]
     row = current.iloc[-1] if not current.empty else player_df.iloc[-1]
+
+    profiles_df, _profiles_err = load_player_profiles()
+    load_kg = np.nan
+    if not profiles_df.empty and player in profiles_df["Jugador"].values:
+        prof_row = profiles_df[profiles_df["Jugador"] == player].iloc[0]
+        load_kg = pd.to_numeric(prof_row.get("Carga_sentadilla"), errors="coerce")
+
     risk_color = RISK_COLORS.get(row["risk_label"], "#475467")
     st.markdown(f'<div class="card"><div style="font-size:1.7rem; font-weight:900; color:#101828;">{player}</div><div style="margin-top:0.35rem;">{render_pills(row)}</div><div style="margin-top:0.55rem;"><span class="pill" style="background:{risk_color};">{row["risk_label"]}</span></div><div style="margin-top:0.7rem; color:#475467;">{player_comment(row)}</div></div>', unsafe_allow_html=True)
 
-    main, pattern, worst_metric, worst_value = infer_fatigue_profile(row)
+    main, pattern_txt, worst_metric, worst_value = infer_fatigue_profile(row)
     flags = flags_for_player(player_df, row)
     if flags:
         st.warning(" | ".join(flags))
-    st.markdown(f"**Diagnóstico:** {main}, con {pattern}. Variable dominante: {LABELS.get(worst_metric, 'NA')} ({'NA' if worst_value is None else f'{worst_value:.1f}%'}).")
+    st.markdown(f"**Diagnóstico:** {main}, con {pattern_txt}. Variable dominante: {LABELS.get(worst_metric, 'NA')} ({'NA' if worst_value is None else f'{worst_value:.1f}%'}).")
 
     c1,c2,c3,c4,c5,c6 = st.columns(6)
     with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), "control")
@@ -2179,6 +2233,18 @@ def page_jugador(metrics_df):
     c,d = st.columns(2)
     with c: st.plotly_chart(plot_player_snapshot_compare(row), use_container_width=True)
     with d: st.plotly_chart(plot_objective_timeline(player_df, selected_date), use_container_width=True)
+
+    st.markdown("### Resultados")
+    render_results_cards(player_df, load_kg)
+    st.markdown(f'<div class="soft-note">{results_summary_text(player_df, load_kg)}</div>', unsafe_allow_html=True)
+
+    r1, r2 = st.columns(2)
+    with r1: st.plotly_chart(plot_player_results_trend(player_df, "CMJ", selected_date, load_kg=load_kg), use_container_width=True)
+    with r2: st.plotly_chart(plot_player_results_trend(player_df, "RSI_mod", selected_date, load_kg=load_kg), use_container_width=True)
+    r3, r4 = st.columns(2)
+    with r3: st.plotly_chart(plot_player_results_trend(player_df, "VMP", selected_date, load_kg=load_kg), use_container_width=True)
+    with r4: st.plotly_chart(plot_player_results_trend(player_df, "1RM_est", selected_date, load_kg=load_kg), use_container_width=True)
+
     st.markdown("### Gráficas principales por variable")
     for m in OBJECTIVE_METRICS:
         l, r = st.columns(2)
