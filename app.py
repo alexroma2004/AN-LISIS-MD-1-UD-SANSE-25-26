@@ -28,6 +28,8 @@ OBJECTIVE_METRICS = ["CMJ", "RSI_mod", "VMP"]
 ALL_METRICS = ["CMJ", "RSI_mod", "VMP", "sRPE"]
 
 LABELS = {"CMJ": "CMJ", "RSI_mod": "RSI mod", "VMP": "VMP sentadilla", "sRPE": "sRPE"}
+MICROCYCLE_OPTIONS = ["MD+1", "MD+2", "MD-4", "MD-3", "MD-2", "MD-1"]
+VALID_BASELINE_DAYS = ["MD-4", "MD-3", "MD-2", "MD-1"]
 
 FORCE_PROFILE_COLORS = {
     "Avión": "#2563EB",
@@ -256,13 +258,13 @@ def load_monitoring():
         data = res.data if getattr(res, "data", None) else []
     except Exception as e:
         st.error(f"Error al leer desde Supabase: {e}")
-        return pd.DataFrame(columns=["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
+        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
 
     if not data:
-        return pd.DataFrame(columns=["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
+        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
 
     df = pd.DataFrame(data)
-    keep_cols = [c for c in ["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
+    keep_cols = [c for c in ["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
     df = df[keep_cols].copy()
 
     if "Fecha" in df.columns:
@@ -285,6 +287,7 @@ def upsert_monitoring(df):
         rows.append({
             "Fecha": str(pd.to_datetime(r["Fecha"]).date()),
             "Jugador": str(r["Jugador"]),
+            "Microciclo": None if pd.isna(r.get("Microciclo")) else str(r.get("Microciclo")),
             "Posicion": None if pd.isna(r.get("Posicion")) else str(r.get("Posicion")),
             "Minutos": None if pd.isna(r.get("Minutos")) else float(r.get("Minutos")),
             "CMJ": None if pd.isna(r.get("CMJ")) else float(r.get("CMJ")),
@@ -1103,7 +1106,7 @@ def parse_tidy(df_raw, forced_date=None):
         elif "obs" in low: rename[c] = "Observaciones"
     df = df.rename(columns=rename)
 
-    needed = ["Jugador","CMJ","RSI_mod","VMP"]
+    needed = ["Jugador","CMJ","RSI_mod"]
     missing = [c for c in needed if c not in df.columns]
     if missing:
         raise ValueError(f"Faltan columnas: {missing}")
@@ -1113,7 +1116,7 @@ def parse_tidy(df_raw, forced_date=None):
             raise ValueError("Falta la columna 'Fecha'. Selecciona una fecha antes de subir el archivo.")
         df["Fecha"] = pd.to_datetime(forced_date)
 
-    for optional in ["Posicion","Minutos","Observaciones","sRPE"]:
+    for optional in ["Posicion","Minutos","Observaciones","sRPE","VMP"]:
         if optional not in df.columns:
             df[optional] = np.nan
 
@@ -1338,9 +1341,116 @@ def flags_for_player(player_df, row):
         flags.append("Requiere decisión individual")
     return flags
 
+
+def progressive_filtered_baseline(group, metric):
+    out = []
+    full_mean = pd.to_numeric(group[metric], errors="coerce").mean()
+    has_micro = "Microciclo" in group.columns
+    for i in range(len(group)):
+        prev = group.iloc[:i].copy()
+        if has_micro:
+            prev = prev[prev["Microciclo"].isin(VALID_BASELINE_DAYS)]
+        vals = pd.to_numeric(prev[metric], errors="coerce").dropna()
+        if len(vals) > 0:
+            out.append(vals.mean())
+        else:
+            out.append(full_mean)
+    return pd.Series(out, index=group.index)
+
+def progressive_ma3_by_cycle(group, metric):
+    if "Microciclo" not in group.columns:
+        return pd.to_numeric(group[metric], errors="coerce").rolling(window=3, min_periods=1).mean()
+    out = pd.Series(index=group.index, dtype=float)
+    for cycle, sub in group.groupby("Microciclo", sort=False):
+        vals = pd.to_numeric(sub[metric], errors="coerce").rolling(window=3, min_periods=1).mean()
+        out.loc[sub.index] = vals.values
+    return out
+
 def compute_metrics(df):
     if df.empty:
         return df.copy()
+    sort_cols = ["Jugador","Fecha"] + (["Microciclo"] if "Microciclo" in df.columns else [])
+    df = df.copy().sort_values(sort_cols).reset_index(drop=True)
+
+    for metric in ALL_METRICS:
+        df[f"{metric}_baseline"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_filtered_baseline(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+        df[f"{metric}_pct_vs_baseline"] = np.where(
+            df[f"{metric}_baseline"].notna() & (df[f"{metric}_baseline"] != 0),
+            (df[metric] - df[f"{metric}_baseline"]) / df[f"{metric}_baseline"] * 100,
+            np.nan,
+        )
+
+        means, stds = [], []
+        for _, g in df.groupby("Jugador")[metric]:
+            m, s = zscore_prior_or_full(g)
+            means.extend(m.tolist()); stds.extend(s.tolist())
+        df[f"{metric}_z_mean_ref"] = means
+        df[f"{metric}_z_std_ref"] = stds
+        df[f"{metric}_z"] = np.where(
+            pd.notna(df[f"{metric}_z_std_ref"]) & (df[f"{metric}_z_std_ref"] != 0),
+            (df[metric] - df[f"{metric}_z_mean_ref"]) / df[f"{metric}_z_std_ref"],
+            np.nan,
+        )
+
+        df[f"{metric}_ma3"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_ma3_by_cycle(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+    for metric in OBJECTIVE_METRICS:
+        sev = df[f"{metric}_pct_vs_baseline"].apply(severity_from_pct)
+        df[f"{metric}_severity"] = sev.apply(lambda x: x[0])
+        df[f"{metric}_severity_points"] = sev.apply(lambda x: x[1])
+
+    df["n_leve"] = sum((df[f"{m}_severity"] == "Fatiga leve").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_mod"] = sum((df[f"{m}_severity"] == "Fatiga moderada").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_crit"] = sum((df[f"{m}_severity"] == "Fatiga crítica").astype(int) for m in OBJECTIVE_METRICS)
+    df["objective_loss_score"] = df[[f"{m}_severity_points" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["objective_loss_mean_pct"] = df[[f"{m}_pct_vs_baseline" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["risk_label"] = df.apply(lambda r: classify_risk_from_counts(int(r["n_leve"]), int(r["n_mod"]), int(r["n_crit"])), axis=1)
+    df["objective_z_score"] = df[[f"{m}_z" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["readiness_score"] = np.clip(100 - (df["objective_loss_score"] / 3.0) * 100, 0, 100)
+    df["objective_loss_score_ma3"] = df.groupby("Jugador")["objective_loss_score"].transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+
+    trend_slopes = []
+    for _, g in df.groupby("Jugador"):
+        vals = g["objective_loss_score"].tolist()
+        local = []
+        for i in range(len(vals)):
+            local.append(slope_last_n(vals[: i + 1], n=3))
+        trend_slopes.extend(local)
+    df["objective_loss_slope_3"] = trend_slopes
+    df["trend_label"] = df["objective_loss_slope_3"].apply(trend_label_from_slope)
+
+    team = df.groupby("Fecha")[OBJECTIVE_METRICS].mean().reset_index().rename(columns={m: f"{m}_team_mean" for m in OBJECTIVE_METRICS})
+    df = df.merge(team, on="Fecha", how="left")
+    for m in OBJECTIVE_METRICS:
+        df[f"{m}_vs_team_pct"] = np.where(
+            df[f"{m}_team_mean"].notna() & (df[f"{m}_team_mean"] != 0),
+            (df[m] - df[f"{m}_team_mean"]) / df[f"{m}_team_mean"] * 100,
+            np.nan,
+        )
+
+    for metric in OBJECTIVE_METRICS + ["objective_loss_score","readiness_score"]:
+        asc = metric != "readiness_score"
+        df[f"{metric}_team_rank"] = df.groupby("Fecha")[metric].rank(method="min", ascending=asc)
+
+    perc = {m: [] for m in OBJECTIVE_METRICS}
+    for _, g in df.groupby("Jugador"):
+        g = g.sort_values("Fecha")
+        for _, r in g.iterrows():
+            hist = g[g["Fecha"] <= r["Fecha"]]
+            for m in OBJECTIVE_METRICS:
+                perc[m].append(historical_percentile(hist, r[m], m))
+    for m in OBJECTIVE_METRICS:
+        df[f"{m}_historical_percentile"] = perc[m]
+    return df.copy()
     df = df.copy().sort_values(["Jugador","Fecha"]).reset_index(drop=True)
 
     for metric in ALL_METRICS:
@@ -1437,12 +1547,12 @@ def render_pills(row):
 def recommendation_from_row(row):
     risk = row["risk_label"]; trend = row.get("trend_label", "Sin tendencia")
     if risk == "Fatiga crítica":
-        return f"Reducir claramente la exigencia neuromuscular en MD-1. Tendencia: {trend.lower()}."
+        return f"Reducir claramente la exigencia neuromuscular en esta sesión. Tendencia: {trend.lower()}."
     if risk in ["Fatiga moderada","Fatiga moderada-alta"]:
         return f"Conviene controlar volumen e intensidad y vigilar la respuesta en el calentamiento. Tendencia: {trend.lower()}."
     if risk in ["Fatiga leve","Fatiga leve-moderada"]:
-        return f"Hay una pérdida objetiva leve/moderada; prioriza una MD-1 conservadora y sin estímulos residuales. Tendencia: {trend.lower()}."
-    return f"Estado compatible con normalidad funcional para MD-1. Tendencia: {trend.lower()}."
+        return f"Hay una pérdida objetiva leve/moderada; prioriza una sesión conservadora y sin estímulos residuales. Tendencia: {trend.lower()}."
+    return f"Estado compatible con normalidad funcional para esta sesión. Tendencia: {trend.lower()}."
 
 def player_comment(row):
     issues = []
@@ -1460,7 +1570,7 @@ def team_interpretation(df_last):
     mod_or_worse = df_last["risk_label"].isin(["Fatiga moderada","Fatiga moderada-alta","Fatiga crítica"]).sum()
     mean_loss = df_last["objective_loss_score"].mean()
     if critical >= 2 or mean_loss >= 2.0:
-        return "El grupo presenta una señal colectiva alta de pérdida de rendimiento en MD-1. Conviene minimizar la carga neuromuscular y priorizar frescura."
+        return "El grupo presenta una señal colectiva alta de pérdida de rendimiento en la sesión analizada. Conviene minimizar la carga neuromuscular y priorizar frescura."
     if mod_or_worse >= max(2, round(len(df_last) * 0.25)) or mean_loss >= 1.2:
         return "Existe una afectación grupal moderada. La sesión de MD-1 debería ser breve, controlada y con estímulos de activación muy medidos."
     if (df_last["risk_label"].isin(["Fatiga leve","Fatiga leve-moderada"])).sum() >= max(2, round(len(df_last) * 0.3)):
@@ -2002,19 +2112,30 @@ def build_pdf_bytes_team_session(team_day, selected_date):
 # PAGES
 # =========================================================
 def page_cargar():
-    st.markdown("### Cargar archivo semanal")
-    fecha_sesion = st.date_input(
-        "Selecciona la fecha a la que corresponde el archivo",
-        value=pd.Timestamp.today().date(),
-        format="DD/MM/YYYY"
-    )
-    uploaded = st.file_uploader("Sube tu Excel/CSV semanal", type=["xlsx","xls","csv"])
+    st.markdown("### CARGAR SESIÓN")
+    c1, c2 = st.columns(2)
+    with c1:
+        fecha_sesion = st.date_input(
+            "Selecciona la fecha a la que corresponde el archivo",
+            value=pd.Timestamp.today().date(),
+            format="DD/MM/YYYY"
+        )
+    with c2:
+        md_label = st.selectbox("Selecciona el día del microciclo", MICROCYCLE_OPTIONS, index=MICROCYCLE_OPTIONS.index("MD-1"))
+
+    st.caption("MD+1 y MD+2 se guardan y analizan, pero no cuentan para el baseline funcional. El baseline se construye con MD-4 a MD-1.")
+    uploaded = st.file_uploader("Sube tu Excel/CSV de la sesión", type=["xlsx","xls","csv"])
+
     if uploaded is not None:
         try:
             parsed = parse_uploaded(uploaded, forced_date=fecha_sesion)
+            parsed["Microciclo"] = md_label
+            if md_label != "MD-1":
+                parsed["VMP"] = np.nan
             st.success(
                 f"Archivo interpretado correctamente: {parsed['Jugador'].nunique()} jugadores · "
-                f"fecha asignada: {pd.to_datetime(fecha_sesion).strftime('%Y-%m-%d')}"
+                f"fecha asignada: {pd.to_datetime(fecha_sesion).strftime('%Y-%m-%d')} · "
+                f"microciclo: {md_label}"
             )
             st.dataframe(parsed, use_container_width=True, hide_index=True)
             if st.button("Guardar en base de datos", type="primary"):
@@ -2040,7 +2161,7 @@ def page_equipo(metrics_df):
     team_day = metrics_df[metrics_df["Fecha"].dt.normalize() == selected_date.normalize()].copy()
 
     c1,c2,c3,c4,c5,c6,c7 = st.columns(7)
-    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), f"{team_day['Jugador'].nunique()} jugadores")
+    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), f"{team_day['Jugador'].nunique()} jugadores · {team_day['Microciclo'].dropna().iloc[0] if 'Microciclo' in team_day.columns and team_day['Microciclo'].notna().any() else 'NA'}")
     with c2: kpi("Readiness media", f"{team_day['readiness_score'].mean():.1f}", "0-100")
     with c3: kpi("Objective loss medio", f"{team_day['objective_loss_score'].mean():.2f}", "0-3")
     with c4: kpi("Pérdida media %", f"{team_day['objective_loss_mean_pct'].mean():.1f}%", "grupo")
@@ -2224,7 +2345,7 @@ def page_jugador(metrics_df):
     st.markdown(f"**Diagnóstico:** {main}, con {pattern_txt}. Variable dominante: {LABELS.get(worst_metric, 'NA')} ({'NA' if worst_value is None else f'{worst_value:.1f}%'}).")
 
     c1,c2,c3,c4,c5,c6 = st.columns(6)
-    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), "control")
+    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), f"{row.get('Microciclo', 'NA')}")
     with c2: kpi("Loss score", f"{row['objective_loss_score']:.2f}", "0-3")
     with c3: kpi("Pérdida media %", f"{row['objective_loss_mean_pct']:.1f}%", "CMJ + RSI + VMP")
     with c4: kpi("Readiness", f"{row['readiness_score']:.0f}", "ese mismo día")
@@ -2406,9 +2527,9 @@ def main():
             base_df = base_df[base_df["Posicion"].isin(positions)].copy()
 
     metrics_df = compute_metrics(base_df) if not base_df.empty else base_df.copy()
-    menu = st.sidebar.radio("Sección", ["Cargar MD-1","Equipo","Perfil F-R","Jugador","Comparador","Informes","Administración"])
+    menu = st.sidebar.radio("Sección", ["CARGAR SESIÓN","Equipo","Perfil F-R","Jugador","Comparador","Informes","Administración"])
 
-    if menu == "Cargar MD-1":
+    if menu == "CARGAR SESIÓN":
         page_cargar()
     elif menu == "Equipo":
         page_equipo(metrics_df)
