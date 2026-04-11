@@ -209,7 +209,7 @@ st.markdown("""
 }
 
 .results-grid {
-    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; margin:10px 0 14px 0;
+    display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap:12px; margin:10px 0 14px 0;
 }
 .result-card {
     background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
@@ -2216,7 +2216,7 @@ def player_estimated_1rm_series(player_df, load_kg):
     ser = player_df["VMP"].apply(lambda x: estimate_1rm_from_load_vmp(load_kg, x))
     return pd.to_numeric(ser, errors="coerce")
 
-def render_results_cards(player_df, load_kg):
+def render_results_cards(player_df, load_kg, body_mass=np.nan):
     refs = {}
     for metric in OBJECTIVE_METRICS:
         refs[metric] = player_results_reference(player_df, metric)
@@ -2229,12 +2229,24 @@ def render_results_cards(player_df, load_kg):
             "initial": est_series.dropna().iloc[0] if est_series.dropna().shape[0] else np.nan,
             "best": est_series.max() if not est_series.empty else np.nan,
         }
+
+        if pd.notna(body_mass) and body_mass > 0:
+            rel_series = est_series / body_mass
+            refs["1RM_rel"] = {
+                "current": rel_series.iloc[-1] if not rel_series.empty else np.nan,
+                "baseline": rel_series.expanding().mean().shift(1).iloc[-1] if len(rel_series) > 1 else rel_series.mean(),
+                "initial": rel_series.dropna().iloc[0] if rel_series.dropna().shape[0] else np.nan,
+                "best": rel_series.max() if not rel_series.empty else np.nan,
+            }
+        else:
+            refs["1RM_rel"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
     else:
         refs["1RM_est"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
+        refs["1RM_rel"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
 
-    order = [("CMJ","cm"), ("RSI_mod",""), ("VMP"," m/s"), ("1RM_est"," kg")]
-    labels = {"CMJ":"CMJ", "RSI_mod":"RSI mod", "VMP":"VMP", "1RM_est":"1RM estimada"}
-    decimals = {"CMJ":1, "RSI_mod":3, "VMP":3, "1RM_est":1}
+    order = [("CMJ","cm"), ("RSI_mod",""), ("VMP"," m/s"), ("1RM_est"," kg"), ("1RM_rel"," kg/kg")]
+    labels = {"CMJ":"CMJ", "RSI_mod":"RSI mod", "VMP":"VMP", "1RM_est":"1RM estimada", "1RM_rel":"1RM relativa"}
+    decimals = {"CMJ":1, "RSI_mod":3, "VMP":3, "1RM_est":1, "1RM_rel":2}
 
     cards = []
     for key, suffix in order:
@@ -2295,7 +2307,7 @@ def plot_player_results_trend(player_df, metric, selected_date, load_kg=None):
     fig.update_layout(title=title, height=280, margin=dict(l=10,r=10,t=40,b=10), yaxis_title=y_title)
     return fig
 
-def results_summary_text(player_df, load_kg=None):
+def results_summary_text(player_df, load_kg=None, body_mass=np.nan):
     msgs = []
     for metric in OBJECTIVE_METRICS:
         ref = player_results_reference(player_df, metric)
@@ -2309,12 +2321,19 @@ def results_summary_text(player_df, load_kg=None):
             pct = pct_change_safe(est_series.iloc[-1], baseline)
             if pd.notna(pct):
                 msgs.append(("1RM_est", pct))
+            if pd.notna(body_mass) and body_mass > 0:
+                rel_series = est_series / body_mass
+                rel_base = rel_series.expanding().mean().shift(1).iloc[-1] if len(rel_series) > 1 else rel_series.mean()
+                pct_rel = pct_change_safe(rel_series.iloc[-1], rel_base)
+                if pd.notna(pct_rel):
+                    msgs.append(("1RM_rel", pct_rel))
     if not msgs:
         return "Sin datos suficientes para resumir la evolución del jugador."
     msgs_sorted = sorted(msgs, key=lambda x: x[1], reverse=True)
     best_metric, best_pct = msgs_sorted[0]
     worst_metric, worst_pct = msgs_sorted[-1]
-    return f"Evolución global del jugador: la señal más positiva aparece en {('1RM estimada' if best_metric=='1RM_est' else LABELS.get(best_metric,best_metric))} ({best_pct:+.1f}% vs baseline). La variable más rezagada es {('1RM estimada' if worst_metric=='1RM_est' else LABELS.get(worst_metric,worst_metric))} ({worst_pct:+.1f}% vs baseline)."
+    metric_name = lambda m: {"1RM_est":"1RM estimada","1RM_rel":"1RM relativa"}.get(m, LABELS.get(m,m))
+    return f"Evolución global del jugador: la señal más positiva aparece en {metric_name(best_metric)} ({best_pct:+.1f}% vs baseline). La variable más rezagada es {metric_name(worst_metric)} ({worst_pct:+.1f}% vs baseline)."
 
 def page_jugador(metrics_df):
     if metrics_df.empty:
@@ -2331,9 +2350,11 @@ def page_jugador(metrics_df):
 
     profiles_df, _profiles_err = load_player_profiles()
     load_kg = np.nan
+    body_mass = np.nan
     if not profiles_df.empty and player in profiles_df["Jugador"].values:
         prof_row = profiles_df[profiles_df["Jugador"] == player].iloc[0]
         load_kg = pd.to_numeric(prof_row.get("Carga_sentadilla"), errors="coerce")
+        body_mass = pd.to_numeric(prof_row.get("Peso_corporal"), errors="coerce")
 
     risk_color = RISK_COLORS.get(row["risk_label"], "#475467")
     st.markdown(f'<div class="card"><div style="font-size:1.7rem; font-weight:900; color:#101828;">{player}</div><div style="margin-top:0.35rem;">{render_pills(row)}</div><div style="margin-top:0.55rem;"><span class="pill" style="background:{risk_color};">{row["risk_label"]}</span></div><div style="margin-top:0.7rem; color:#475467;">{player_comment(row)}</div></div>', unsafe_allow_html=True)
@@ -2360,15 +2381,9 @@ def page_jugador(metrics_df):
     with d: st.plotly_chart(plot_objective_timeline(player_df, selected_date), use_container_width=True)
 
     st.markdown("### Resultados")
-    render_results_cards(player_df, load_kg)
-    st.markdown(f'<div class="soft-note">{results_summary_text(player_df, load_kg)}</div>', unsafe_allow_html=True)
+    render_results_cards(player_df, load_kg, body_mass=body_mass)
+    st.markdown(f'<div class="soft-note">{results_summary_text(player_df, load_kg, body_mass=body_mass)}</div>', unsafe_allow_html=True)
 
-    r1, r2 = st.columns(2)
-    with r1: st.plotly_chart(plot_player_results_trend(player_df, "CMJ", selected_date, load_kg=load_kg), use_container_width=True)
-    with r2: st.plotly_chart(plot_player_results_trend(player_df, "RSI_mod", selected_date, load_kg=load_kg), use_container_width=True)
-    r3, r4 = st.columns(2)
-    with r3: st.plotly_chart(plot_player_results_trend(player_df, "VMP", selected_date, load_kg=load_kg), use_container_width=True)
-    with r4: st.plotly_chart(plot_player_results_trend(player_df, "1RM_est", selected_date, load_kg=load_kg), use_container_width=True)
 
     st.markdown("### Gráficas principales por variable")
     for m in OBJECTIVE_METRICS:
