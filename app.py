@@ -2111,11 +2111,11 @@ def render_results_cards(player_df, load_kg):
     else:
         refs["1RM_est"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
 
-    cards = []
     order = [("CMJ","cm"), ("RSI_mod",""), ("VMP"," m/s"), ("1RM_est"," kg")]
     labels = {"CMJ":"CMJ", "RSI_mod":"RSI mod", "VMP":"VMP", "1RM_est":"1RM estimada"}
     decimals = {"CMJ":1, "RSI_mod":3, "VMP":3, "1RM_est":1}
 
+    cards = []
     for key, suffix in order:
         ref = refs[key]
         current = ref["current"]
@@ -2123,21 +2123,25 @@ def render_results_cards(player_df, load_kg):
         vs_initial = pct_change_safe(current, ref["initial"])
         css_class, txt = trend_class(vs_base)
         dist_best = pct_change_safe(current, ref["best"])
+
         best_text = "—" if pd.isna(ref["best"]) else f"{ref['best']:.{decimals[key]}f}{suffix}"
         current_text = "—" if pd.isna(current) else f"{current:.{decimals[key]}f}{suffix}"
         init_text = "—" if pd.isna(vs_initial) else f"{vs_initial:+.1f}%"
-        base_text = "—" if pd.isna(vs_base) else f"{vs_base:+.1f}%"
         best_gap = "—" if pd.isna(dist_best) else f"{dist_best:+.1f}%"
-        cards.append(f"""
-        <div class="result-card">
-            <div class="lab">{labels[key]}</div>
-            <div class="big">{current_text}</div>
-            <div class="mini"><span class="{css_class}">{txt} vs baseline</span></div>
-            <div class="mini">vs inicio: <b>{init_text}</b></div>
-            <div class="mini">mejor marca: <b>{best_text}</b> · distancia: <b>{best_gap}</b></div>
-        </div>
-        """)
-    st.markdown(f'<div class="results-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+        card_html = (
+            f'<div class="result-card">'
+            f'<div class="lab">{labels[key]}</div>'
+            f'<div class="big">{current_text}</div>'
+            f'<div class="mini"><span class="{css_class}">{txt} vs baseline</span></div>'
+            f'<div class="mini">vs inicio: <b>{init_text}</b></div>'
+            f'<div class="mini">mejor marca: <b>{best_text}</b> · distancia: <b>{best_gap}</b></div>'
+            f'</div>'
+        )
+        cards.append(card_html)
+
+    html = '<div class="results-grid">' + ''.join(cards) + '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 def plot_player_results_trend(player_df, metric, selected_date, load_kg=None):
     fig = go.Figure()
