@@ -2435,12 +2435,20 @@ def player_estimated_1rm_series(player_df, load_kg):
 def render_results_cards(player_df, row, load_kg, body_mass=np.nan):
     refs = {}
     for metric in OBJECTIVE_METRICS:
-        vals = pd.to_numeric(player_df[metric], errors="coerce").dropna() if metric in player_df.columns else pd.Series(dtype=float)
+        vals_pre = pd.to_numeric(player_df[metric], errors="coerce").dropna() if metric in player_df.columns else pd.Series(dtype=float)
+        best_series = vals_pre.copy()
+
+        post_col = f"{metric}_post"
+        if post_col in player_df.columns:
+            vals_post = pd.to_numeric(player_df[post_col], errors="coerce").dropna()
+            if not vals_post.empty:
+                best_series = pd.concat([best_series, vals_post], ignore_index=True)
+
         refs[metric] = {
             "current": pd.to_numeric(pd.Series([row.get(metric, np.nan)]), errors="coerce").iloc[0],
             "baseline": pd.to_numeric(pd.Series([row.get(f"{metric}_baseline", np.nan)]), errors="coerce").iloc[0],
-            "initial": vals.iloc[0] if not vals.empty else np.nan,
-            "best": vals.max() if not vals.empty else np.nan,
+            "initial": vals_pre.iloc[0] if not vals_pre.empty else np.nan,
+            "best": best_series.max() if not best_series.empty else np.nan,
         }
 
     if pd.notna(load_kg):
@@ -2531,6 +2539,70 @@ def results_summary_text(player_df, row, load_kg=None, body_mass=np.nan):
     worst_metric, worst_pct = msgs_sorted[-1]
     metric_name = lambda m: {"1RM_est":"1RM estimada","1RM_rel":"1RM relativa"}.get(m, LABELS.get(m,m))
     return f"Evolución global del jugador: la señal más positiva aparece en {metric_name(best_metric)} ({best_pct:+.1f}% vs baseline). La variable más rezagada es {metric_name(worst_metric)} ({worst_pct:+.1f}% vs baseline)."
+
+
+def plot_session_candlestick(player_df, metric, selected_date):
+    post_col = f"{metric}_post"
+    fig = go.Figure()
+
+    if metric not in player_df.columns or post_col not in player_df.columns:
+        fig.update_layout(
+            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+            height=320,
+            margin=dict(l=10, r=10, t=40, b=10),
+            xaxis_rangeslider_visible=False,
+        )
+        return fig
+
+    temp = player_df[["Fecha", metric, post_col]].copy()
+    temp = temp.dropna(subset=[metric, post_col], how="any")
+
+    if temp.empty:
+        fig.update_layout(
+            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+            height=320,
+            margin=dict(l=10, r=10, t=40, b=10),
+            xaxis_rangeslider_visible=False,
+        )
+        return fig
+
+    temp["open"] = pd.to_numeric(temp[metric], errors="coerce")
+    temp["close"] = pd.to_numeric(temp[post_col], errors="coerce")
+    temp["high"] = temp[["open", "close"]].max(axis=1)
+    temp["low"] = temp[["open", "close"]].min(axis=1)
+
+    fig.add_trace(go.Candlestick(
+        x=temp["Fecha"],
+        open=temp["open"],
+        high=temp["high"],
+        low=temp["low"],
+        close=temp["close"],
+        name="Sesión",
+        increasing_line_color="#16A34A",
+        decreasing_line_color="#DC2626",
+        increasing_fillcolor="rgba(22,163,74,0.35)",
+        decreasing_fillcolor="rgba(220,38,38,0.35)",
+        whiskerwidth=0.4,
+    ))
+
+    sel = temp[temp["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+    if not sel.empty:
+        fig.add_trace(go.Scatter(
+            x=[sel["Fecha"].iloc[-1]],
+            y=[sel["high"].iloc[-1]],
+            mode="markers",
+            name="Fecha",
+            marker=dict(size=10, color="#1D4ED8", symbol="diamond")
+        ))
+
+    fig.update_layout(
+        title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+        height=320,
+        margin=dict(l=10, r=10, t=40, b=10),
+        xaxis_rangeslider_visible=False,
+    )
+    return fig
+
 
 def page_jugador(metrics_df):
     if metrics_df.empty:
