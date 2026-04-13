@@ -224,6 +224,20 @@ st.markdown("""
 .result-up {color:#15803D; font-weight:800;}
 .result-down {color:#C2410C; font-weight:800;}
 .result-neutral {color:#334155; font-weight:800;}
+
+.prepost-grid {
+    display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; margin:10px 0 14px 0;
+}
+.prepost-card {
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border:1px solid rgba(15,23,42,0.08);
+    border-radius:20px;
+    padding:14px 16px;
+    box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+}
+.prepost-card .lab {font-size:0.82rem; color:#667085; font-weight:700;}
+.prepost-card .big {font-size:1.35rem; color:#101828; font-weight:900; margin-top:4px;}
+.prepost-card .mini {font-size:0.80rem; color:#475467; margin-top:6px; line-height:1.35;}
 .soft-note {
     background:#EFF6FF;
     border:1px solid #DBEAFE;
@@ -258,18 +272,18 @@ def load_monitoring():
         data = res.data if getattr(res, "data", None) else []
     except Exception as e:
         st.error(f"Error al leer desde Supabase: {e}")
-        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
+        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones"])
 
     if not data:
-        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"])
+        return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones"])
 
     df = pd.DataFrame(data)
-    keep_cols = [c for c in ["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
+    keep_cols = [c for c in ["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
     df = df[keep_cols].copy()
 
     if "Fecha" in df.columns:
         df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
-    for c in ["Minutos", *ALL_METRICS]:
+    for c in ["Minutos", *ALL_METRICS, "CMJ_post", "RSI_mod_post"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     if "Jugador" in df.columns:
@@ -292,6 +306,8 @@ def upsert_monitoring(df):
             "Minutos": None if pd.isna(r.get("Minutos")) else float(r.get("Minutos")),
             "CMJ": None if pd.isna(r.get("CMJ")) else float(r.get("CMJ")),
             "RSI_mod": None if pd.isna(r.get("RSI_mod")) else float(r.get("RSI_mod")),
+            "CMJ_post": None if pd.isna(r.get("CMJ_post")) else float(r.get("CMJ_post")),
+            "RSI_mod_post": None if pd.isna(r.get("RSI_mod_post")) else float(r.get("RSI_mod_post")),
             "VMP": None if pd.isna(r.get("VMP")) else float(r.get("VMP")),
             "sRPE": None if pd.isna(r.get("sRPE")) else float(r.get("sRPE")),
             "Observaciones": None if pd.isna(r.get("Observaciones")) else str(r.get("Observaciones")),
@@ -1094,16 +1110,29 @@ def parse_tidy(df_raw, forced_date=None):
 
     rename = {}
     for c in df.columns:
-        low = c.lower().strip()
-        if low in ["fecha","date"]: rename[c] = "Fecha"
-        elif low in ["jugador","player","nombre"]: rename[c] = "Jugador"
-        elif "pos" in low: rename[c] = "Posicion"
-        elif "min" in low: rename[c] = "Minutos"
-        elif "cmj" in low: rename[c] = "CMJ"
-        elif "rsi" in low: rename[c] = "RSI_mod"
-        elif "vmp" in low: rename[c] = "VMP"
-        elif "srpe" in low or "s-rpe" in low or low == "rpe": rename[c] = "sRPE"
-        elif "obs" in low: rename[c] = "Observaciones"
+        low = str(c).lower().strip()
+        if low in ["fecha","date"]:
+            rename[c] = "Fecha"
+        elif low in ["jugador","player","nombre"]:
+            rename[c] = "Jugador"
+        elif "pos" in low:
+            rename[c] = "Posicion"
+        elif "min" in low:
+            rename[c] = "Minutos"
+        elif "cmj" in low and "post" in low:
+            rename[c] = "CMJ_post"
+        elif ("rsi" in low or "rsi mod" in low or "rsi_mod" in low) and "post" in low:
+            rename[c] = "RSI_mod_post"
+        elif "cmj" in low:
+            rename[c] = "CMJ"
+        elif "rsi" in low:
+            rename[c] = "RSI_mod"
+        elif "vmp" in low:
+            rename[c] = "VMP"
+        elif "srpe" in low or "s-rpe" in low or low == "rpe":
+            rename[c] = "sRPE"
+        elif "obs" in low:
+            rename[c] = "Observaciones"
     df = df.rename(columns=rename)
 
     needed = ["Jugador","CMJ","RSI_mod"]
@@ -1116,11 +1145,11 @@ def parse_tidy(df_raw, forced_date=None):
             raise ValueError("Falta la columna 'Fecha'. Selecciona una fecha antes de subir el archivo.")
         df["Fecha"] = pd.to_datetime(forced_date)
 
-    for optional in ["Posicion","Minutos","Observaciones","sRPE","VMP"]:
+    for optional in ["Posicion","Minutos","Observaciones","sRPE","VMP","CMJ_post","RSI_mod_post"]:
         if optional not in df.columns:
             df[optional] = np.nan
 
-    df = df[["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","VMP","sRPE","Observaciones"]].copy()
+    df = df[["Fecha","Jugador","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones"]].copy()
 
     if forced_date is not None:
         df["Fecha"] = pd.to_datetime(forced_date)
@@ -1128,7 +1157,7 @@ def parse_tidy(df_raw, forced_date=None):
         df["Fecha"] = pd.to_datetime(df["Fecha"], dayfirst=True, errors="coerce")
 
     df["Jugador"] = df["Jugador"].apply(std_name)
-    for c in ["Minutos", *ALL_METRICS]:
+    for c in ["Minutos", *ALL_METRICS, "CMJ_post", "RSI_mod_post"]:
         df[c] = df[c].apply(safe_num)
     return df.dropna(subset=["Fecha","Jugador"]).drop_duplicates(subset=["Fecha","Jugador"], keep="last")
 
@@ -1137,6 +1166,88 @@ def parse_block(df_raw):
     df.columns = range(df.shape[1])
     df = df.replace(r"^\s*$", np.nan, regex=True)
 
+    # =====================================================
+    # FORMATO BLOQUE PRE/POST
+    # NOMBRE | VARIABLES | PRE | POST
+    # =====================================================
+    header = [str(v).strip().lower() if pd.notna(v) else "" for v in df.iloc[0].tolist()] if len(df) else []
+    if header and any("nombre" in x for x in header) and any("variable" in x for x in header) and any(x == "pre" for x in header) and any(x == "post" for x in header):
+        col_name = next((i for i, x in enumerate(header) if "nombre" in x), 0)
+        col_var = next((i for i, x in enumerate(header) if "variable" in x), 1)
+        col_pre = next((i for i, x in enumerate(header) if x == "pre"), 2)
+        col_post = next((i for i, x in enumerate(header) if x == "post"), 3)
+
+        records = []
+        current_player = None
+        bucket = {
+            "CMJ": np.nan,
+            "RSI_mod": np.nan,
+            "CMJ_post": np.nan,
+            "RSI_mod_post": np.nan,
+            "VMP": np.nan,
+            "sRPE": np.nan,
+        }
+
+        def flush_player(player_name, data_bucket):
+            if player_name is None:
+                return
+            if all(pd.isna(data_bucket[k]) for k in ["CMJ", "RSI_mod", "CMJ_post", "RSI_mod_post", "VMP", "sRPE"]):
+                return
+            records.append({
+                "Fecha": pd.NaT,
+                "Jugador": std_name(player_name),
+                "Posicion": np.nan,
+                "Minutos": np.nan,
+                "CMJ": data_bucket["CMJ"],
+                "RSI_mod": data_bucket["RSI_mod"],
+                "CMJ_post": data_bucket["CMJ_post"],
+                "RSI_mod_post": data_bucket["RSI_mod_post"],
+                "VMP": data_bucket["VMP"],
+                "sRPE": data_bucket["sRPE"],
+                "Observaciones": np.nan,
+            })
+
+        for i in range(1, len(df)):
+            player_cell = df.iat[i, col_name] if col_name < df.shape[1] else np.nan
+            var_cell = df.iat[i, col_var] if col_var < df.shape[1] else np.nan
+            pre_cell = df.iat[i, col_pre] if col_pre < df.shape[1] else np.nan
+            post_cell = df.iat[i, col_post] if col_post < df.shape[1] else np.nan
+
+            if pd.notna(player_cell) and str(player_cell).strip() != "":
+                flush_player(current_player, bucket)
+                current_player = str(player_cell).strip()
+                bucket = {
+                    "CMJ": np.nan,
+                    "RSI_mod": np.nan,
+                    "CMJ_post": np.nan,
+                    "RSI_mod_post": np.nan,
+                    "VMP": np.nan,
+                    "sRPE": np.nan,
+                }
+
+            var_txt = str(var_cell).strip().lower() if pd.notna(var_cell) else ""
+            pre_val = safe_num(pre_cell)
+            post_val = safe_num(post_cell)
+
+            if "cmj" in var_txt:
+                bucket["CMJ"] = pre_val
+                bucket["CMJ_post"] = post_val
+            elif "rsi" in var_txt:
+                bucket["RSI_mod"] = pre_val
+                bucket["RSI_mod_post"] = post_val
+            elif "vmp" in var_txt:
+                bucket["VMP"] = pre_val
+            elif "rpe" in var_txt:
+                bucket["sRPE"] = pre_val
+
+        flush_player(current_player, bucket)
+        out = pd.DataFrame(records)
+        if not out.empty:
+            return out.drop_duplicates(subset=["Jugador"], keep="last")
+
+    # =====================================================
+    # FORMATOS BLOQUE HISTÓRICOS ANTIGUOS
+    # =====================================================
     first_row = [str(v).strip().lower() if pd.notna(v) else "" for v in df.iloc[0].tolist()] if len(df) else []
     if first_row and "nombre" in first_row[0] and any("variable" in x for x in first_row):
         date_cols = []
@@ -1161,7 +1272,7 @@ def parse_block(df_raw):
                     vmp = safe_num(df.iat[i+2, c]) if c < df.shape[1] else np.nan
                     srpe = safe_num(df.iat[i+3, c]) if c < df.shape[1] else np.nan
                     if sum(pd.notna(x) for x in [cmj, rsi, vmp, srpe]) >= 2:
-                        records.append({"Fecha": d, "Jugador": player_name, "Posicion": np.nan, "Minutos": np.nan, "CMJ": cmj, "RSI_mod": rsi, "VMP": vmp, "sRPE": srpe, "Observaciones": np.nan})
+                        records.append({"Fecha": d, "Jugador": player_name, "Posicion": np.nan, "Minutos": np.nan, "CMJ": cmj, "RSI_mod": rsi, "CMJ_post": np.nan, "RSI_mod_post": np.nan, "VMP": vmp, "sRPE": srpe, "Observaciones": np.nan})
                 i += 4
                 continue
             i += 1
@@ -1199,7 +1310,7 @@ def parse_block(df_raw):
                 labels.append(label_j)
                 nums.append(first_valid_numeric(row_j))
             if "cmj" in labels[0] and "rsi" in labels[1] and "vmp" in labels[2] and any(k in labels[3] for k in ["rpe","srpe","s-rpe"]) and sum(pd.notna(v) for v in nums) >= 3:
-                records.append({"Fecha": current_date, "Jugador": current_player, "Posicion": np.nan, "Minutos": np.nan, "CMJ": nums[0], "RSI_mod": nums[1], "VMP": nums[2], "sRPE": nums[3], "Observaciones": np.nan})
+                records.append({"Fecha": current_date, "Jugador": current_player, "Posicion": np.nan, "Minutos": np.nan, "CMJ": nums[0], "RSI_mod": nums[1], "CMJ_post": np.nan, "RSI_mod_post": np.nan, "VMP": nums[2], "sRPE": nums[3], "Observaciones": np.nan})
                 i += 4
                 continue
 
@@ -1216,14 +1327,14 @@ def parse_block(df_raw):
                 labels.append(label_j)
                 nums.append(first_valid_numeric(row_j))
             if "cmj" in labels[0] and "rsi" in labels[1] and "vmp" in labels[2] and any(k in labels[3] for k in ["rpe","srpe","s-rpe"]) and sum(pd.notna(v) for v in nums) >= 3:
-                records.append({"Fecha": current_date, "Jugador": current_player, "Posicion": np.nan, "Minutos": np.nan, "CMJ": nums[0], "RSI_mod": nums[1], "VMP": nums[2], "sRPE": nums[3], "Observaciones": np.nan})
+                records.append({"Fecha": current_date, "Jugador": current_player, "Posicion": np.nan, "Minutos": np.nan, "CMJ": nums[0], "RSI_mod": nums[1], "CMJ_post": np.nan, "RSI_mod_post": np.nan, "VMP": nums[2], "sRPE": nums[3], "Observaciones": np.nan})
                 i += 5
                 continue
         i += 1
 
     out = pd.DataFrame(records)
     if out.empty:
-        raise ValueError("No se pudieron interpretar los bloques del archivo.")
+        raise ValueError("No se pudo interpretar el formato bloque del archivo.")
     return out.drop_duplicates(subset=["Fecha","Jugador"], keep="last")
 
 def parse_uploaded(uploaded_file, forced_date=None):
@@ -1237,6 +1348,10 @@ def parse_uploaded(uploaded_file, forced_date=None):
             parsed["Fecha"] = pd.to_datetime(forced_date)
     else:
         raise ValueError("No se pudo detectar el formato del archivo.")
+    if "CMJ_post" not in parsed.columns:
+        parsed["CMJ_post"] = np.nan
+    if "RSI_mod_post" not in parsed.columns:
+        parsed["RSI_mod_post"] = np.nan
     if forced_date is not None:
         parsed["Fecha"] = pd.to_datetime(forced_date)
     return parsed
@@ -1342,6 +1457,87 @@ def flags_for_player(player_df, row):
     return flags
 
 
+
+def compute_pre_post_fields(df):
+    df = df.copy()
+    for metric in ["CMJ", "RSI_mod"]:
+        post_col = f"{metric}_post"
+        df[f"{metric}_delta_abs"] = np.where(
+            df[metric].notna() & df[post_col].notna(),
+            df[post_col] - df[metric],
+            np.nan,
+        )
+        df[f"{metric}_delta_pct"] = np.where(
+            df[metric].notna() & (df[metric] != 0) & df[post_col].notna(),
+            (df[post_col] - df[metric]) / df[metric] * 100,
+            np.nan,
+        )
+    return df
+
+def render_pre_post_cards(row):
+    cards = []
+    for metric, label, suffix, dec in [("CMJ","CMJ"," cm",1),("RSI_mod","RSI mod","",3)]:
+        pre = row.get(metric, np.nan)
+        post = row.get(f"{metric}_post", np.nan)
+        delta_abs = row.get(f"{metric}_delta_abs", np.nan)
+        delta_pct = row.get(f"{metric}_delta_pct", np.nan)
+        if pd.isna(delta_pct):
+            trend_class = "result-neutral"; trend_text = "Sin dato post"
+        elif delta_pct > 0:
+            trend_class = "result-up"; trend_text = f"{delta_pct:+.1f}%"
+        elif delta_pct < 0:
+            trend_class = "result-down"; trend_text = f"{delta_pct:+.1f}%"
+        else:
+            trend_class = "result-neutral"; trend_text = f"{delta_pct:+.1f}%"
+        pre_txt = "—" if pd.isna(pre) else f"{pre:.{dec}f}{suffix}"
+        post_txt = "—" if pd.isna(post) else f"{post:.{dec}f}{suffix}"
+        delta_abs_txt = "—" if pd.isna(delta_abs) else f"{delta_abs:+.{dec}f}{suffix}"
+        cards.append(
+            f'<div class="prepost-card">'
+            f'<div class="lab">{label} · PRE vs POST</div>'
+            f'<div class="big">{pre_txt} → {post_txt}</div>'
+            f'<div class="mini"><span class="{trend_class}">{trend_text} intra-sesión</span></div>'
+            f'<div class="mini">cambio absoluto: <b>{delta_abs_txt}</b></div>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="prepost-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+def plot_pre_post_current(row):
+    temp = pd.DataFrame({
+        "Métrica": ["CMJ", "RSI mod"],
+        "PRE": [row.get("CMJ", np.nan), row.get("RSI_mod", np.nan)],
+        "POST": [row.get("CMJ_post", np.nan), row.get("RSI_mod_post", np.nan)],
+    })
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["PRE"], name="PRE"))
+    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["POST"], name="POST"))
+    fig.update_layout(barmode="group", title="Comparación PRE vs POST · sesión seleccionada", height=320, margin=dict(l=10,r=10,t=40,b=10))
+    return fig
+
+def plot_delta_timeline(player_df, metric, selected_date):
+    fig = go.Figure()
+    y = player_df.get(f"{metric}_delta_pct", pd.Series(index=player_df.index, dtype=float))
+    fig.add_trace(go.Scatter(x=player_df["Fecha"], y=y, mode="lines+markers", name="Δ % post-pre", line=dict(width=3)))
+    fig.add_hline(y=0, line_dash="dot")
+    sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+    if not sel.empty:
+        val = sel.iloc[-1].get(f"{metric}_delta_pct", np.nan)
+        fig.add_trace(go.Scatter(x=[sel.iloc[-1]["Fecha"]], y=[val], mode="markers", name="Fecha", marker=dict(size=12, color="#C62828", symbol="diamond")))
+    fig.update_layout(title=f"{LABELS.get(metric, metric)} · Δ % POST vs PRE", height=300, margin=dict(l=10,r=10,t=40,b=10))
+    return fig
+
+def plot_team_pre_post_delta(team_df):
+    rows = []
+    for metric in ["CMJ","RSI_mod"]:
+        col = f"{metric}_delta_pct"
+        vals = pd.to_numeric(team_df[col], errors="coerce").dropna() if col in team_df.columns else pd.Series(dtype=float)
+        rows.append({"Métrica": LABELS.get(metric, metric), "Delta_pct": vals.mean() if not vals.empty else np.nan})
+    temp = pd.DataFrame(rows)
+    fig = px.bar(temp, x="Métrica", y="Delta_pct", text="Delta_pct", title="Respuesta media PRE → POST del equipo")
+    fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig.add_hline(y=0, line_dash="dot")
+    fig.update_layout(height=320, margin=dict(l=10,r=10,t=40,b=10), yaxis_title="%")
+    return fig
 def progressive_filtered_baseline(group, metric):
     out = []
     full_mean = pd.to_numeric(group[metric], errors="coerce").mean()
@@ -1450,6 +1646,7 @@ def compute_metrics(df):
                 perc[m].append(historical_percentile(hist, r[m], m))
     for m in OBJECTIVE_METRICS:
         df[f"{m}_historical_percentile"] = perc[m]
+    df = compute_pre_post_fields(df)
     return df.copy()
     df = df.copy().sort_values(["Jugador","Fecha"]).reset_index(drop=True)
 
@@ -1528,6 +1725,7 @@ def compute_metrics(df):
                 perc[m].append(historical_percentile(hist, r[m], m))
     for m in OBJECTIVE_METRICS:
         df[f"{m}_historical_percentile"] = perc[m]
+    df = compute_pre_post_fields(df)
     return df
 
 # =========================================================
@@ -2123,7 +2321,7 @@ def page_cargar():
     with c2:
         md_label = st.selectbox("Selecciona el día del microciclo", MICROCYCLE_OPTIONS, index=MICROCYCLE_OPTIONS.index("MD-1"))
 
-    st.caption("MD+1 y MD+2 se guardan y analizan, pero no cuentan para el baseline funcional. El baseline se construye con MD-4 a MD-1.")
+    st.caption("MD+1 y MD+2 se guardan y analizan, pero no cuentan para el baseline funcional. El baseline se construye con MD-4 a MD-1. Si tu Excel incluye columnas PRE y POST de CMJ y RSI mod, ambas se guardarán dentro de la misma sesión.")
     uploaded = st.file_uploader("Sube tu Excel/CSV de la sesión", type=["xlsx","xls","csv"])
 
     if uploaded is not None:
@@ -2180,9 +2378,17 @@ def page_equipo(metrics_df):
     with c: st.plotly_chart(plot_team_heatmap(team_day), use_container_width=True)
     with d: st.plotly_chart(plot_team_objective_bar(team_day), use_container_width=True)
 
-    table = team_day[["Jugador","CMJ_pct_vs_baseline","RSI_mod_pct_vs_baseline","VMP_pct_vs_baseline","objective_loss_mean_pct","objective_loss_score","objective_z_score","readiness_score","risk_label","trend_label"]].copy()
-    table.columns = ["Jugador","CMJ %","RSI mod %","VMP %","Pérdida media %","Loss score","Z-score objetivo","Readiness","Riesgo","Tendencia"]
-    for col in ["CMJ %","RSI mod %","VMP %","Pérdida media %","Loss score","Z-score objetivo","Readiness"]:
+    st.markdown("### Respuesta intra-sesión · PRE vs POST")
+    p1,p2,p3,p4 = st.columns(4)
+    with p1: kpi("CMJ Δ medio", "NA" if team_day["CMJ_delta_pct"].dropna().empty else f"{team_day['CMJ_delta_pct'].mean():+.1f}%", "post vs pre")
+    with p2: kpi("RSI Δ medio", "NA" if team_day["RSI_mod_delta_pct"].dropna().empty else f"{team_day['RSI_mod_delta_pct'].mean():+.1f}%", "post vs pre")
+    with p3: kpi("CMJ post disponibles", int(team_day["CMJ_post"].notna().sum()) if "CMJ_post" in team_day.columns else 0, "jugadores")
+    with p4: kpi("RSI post disponibles", int(team_day["RSI_mod_post"].notna().sum()) if "RSI_mod_post" in team_day.columns else 0, "jugadores")
+    st.plotly_chart(plot_team_pre_post_delta(team_day), use_container_width=True)
+
+    table = team_day[["Jugador","CMJ_pct_vs_baseline","RSI_mod_pct_vs_baseline","VMP_pct_vs_baseline","CMJ_delta_pct","RSI_mod_delta_pct","objective_loss_mean_pct","objective_loss_score","objective_z_score","readiness_score","risk_label","trend_label"]].copy()
+    table.columns = ["Jugador","CMJ %","RSI mod %","VMP %","CMJ Δ post-pre %","RSI Δ post-pre %","Pérdida media %","Loss score","Z-score objetivo","Readiness","Riesgo","Tendencia"]
+    for col in ["CMJ %","RSI mod %","VMP %","CMJ Δ post-pre %","RSI Δ post-pre %","Pérdida media %","Loss score","Z-score objetivo","Readiness"]:
         table[col] = table[col].round(2)
     st.dataframe(table.sort_values(["Loss score","Pérdida media %"], ascending=[False, True]), use_container_width=True, hide_index=True)
 
@@ -2384,6 +2590,17 @@ def page_jugador(metrics_df):
     render_results_cards(player_df, load_kg, body_mass=body_mass)
     st.markdown(f'<div class="soft-note">{results_summary_text(player_df, load_kg, body_mass=body_mass)}</div>', unsafe_allow_html=True)
 
+    st.markdown("### Respuesta intra-sesión · PRE vs POST")
+    render_pre_post_cards(row)
+    cmj_delta_txt = "NA" if pd.isna(row.get("CMJ_delta_pct")) else f"{row.get('CMJ_delta_pct'):+.1f}%"
+    rsi_delta_txt = "NA" if pd.isna(row.get("RSI_mod_delta_pct")) else f"{row.get('RSI_mod_delta_pct'):+.1f}%"
+    x1, x2 = st.columns(2)
+    with x1:
+        st.plotly_chart(plot_pre_post_current(row), use_container_width=True)
+    with x2:
+        st.markdown(f'<div class="soft-note">CMJ post-pre: {cmj_delta_txt} · RSI post-pre: {rsi_delta_txt}.</div>', unsafe_allow_html=True)
+        st.plotly_chart(plot_delta_timeline(player_df, "CMJ", selected_date), use_container_width=True)
+        st.plotly_chart(plot_delta_timeline(player_df, "RSI_mod", selected_date), use_container_width=True)
 
     st.markdown("### Gráficas principales por variable")
     for m in OBJECTIVE_METRICS:
