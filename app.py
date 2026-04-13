@@ -278,8 +278,13 @@ def load_monitoring():
         return pd.DataFrame(columns=["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones"])
 
     df = pd.DataFrame(data)
-    keep_cols = [c for c in ["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones","updated_at"] if c in df.columns]
-    df = df[keep_cols].copy()
+
+    expected_cols = ["Fecha","Jugador","Microciclo","Posicion","Minutos","CMJ","RSI_mod","CMJ_post","RSI_mod_post","VMP","sRPE","Observaciones","updated_at"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    df = df[expected_cols].copy()
 
     if "Fecha" in df.columns:
         df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
@@ -1462,6 +1467,11 @@ def compute_pre_post_fields(df):
     df = df.copy()
     for metric in ["CMJ", "RSI_mod"]:
         post_col = f"{metric}_post"
+        if metric not in df.columns:
+            df[metric] = np.nan
+        if post_col not in df.columns:
+            df[post_col] = np.nan
+
         df[f"{metric}_delta_abs"] = np.where(
             df[metric].notna() & df[post_col].notna(),
             df[post_col] - df[metric],
