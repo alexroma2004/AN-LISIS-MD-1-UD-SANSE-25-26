@@ -2432,27 +2432,37 @@ def player_estimated_1rm_series(player_df, load_kg):
     ser = player_df["VMP"].apply(lambda x: estimate_1rm_from_load_vmp(load_kg, x))
     return pd.to_numeric(ser, errors="coerce")
 
-def render_results_cards(player_df, load_kg, body_mass=np.nan):
+def render_results_cards(player_df, row, load_kg, body_mass=np.nan):
     refs = {}
     for metric in OBJECTIVE_METRICS:
-        refs[metric] = player_results_reference(player_df, metric)
+        vals = pd.to_numeric(player_df[metric], errors="coerce").dropna() if metric in player_df.columns else pd.Series(dtype=float)
+        refs[metric] = {
+            "current": pd.to_numeric(pd.Series([row.get(metric, np.nan)]), errors="coerce").iloc[0],
+            "baseline": pd.to_numeric(pd.Series([row.get(f"{metric}_baseline", np.nan)]), errors="coerce").iloc[0],
+            "initial": vals.iloc[0] if not vals.empty else np.nan,
+            "best": vals.max() if not vals.empty else np.nan,
+        }
 
     if pd.notna(load_kg):
         est_series = player_estimated_1rm_series(player_df, load_kg)
+        current_est = estimate_1rm_from_load_vmp(load_kg, row.get("VMP", np.nan))
+        est_hist = est_series.dropna()
         refs["1RM_est"] = {
-            "current": est_series.iloc[-1] if not est_series.empty else np.nan,
-            "baseline": est_series.expanding().mean().shift(1).iloc[-1] if len(est_series) > 1 else est_series.mean(),
-            "initial": est_series.dropna().iloc[0] if est_series.dropna().shape[0] else np.nan,
-            "best": est_series.max() if not est_series.empty else np.nan,
+            "current": current_est if pd.notna(current_est) else (est_hist.iloc[-1] if not est_hist.empty else np.nan),
+            "baseline": est_hist.expanding().mean().shift(1).iloc[-1] if len(est_hist) > 1 else (est_hist.mean() if not est_hist.empty else np.nan),
+            "initial": est_hist.iloc[0] if not est_hist.empty else np.nan,
+            "best": est_hist.max() if not est_hist.empty else np.nan,
         }
 
         if pd.notna(body_mass) and body_mass > 0:
             rel_series = est_series / body_mass
+            rel_hist = rel_series.dropna()
+            current_rel = current_est / body_mass if pd.notna(current_est) else np.nan
             refs["1RM_rel"] = {
-                "current": rel_series.iloc[-1] if not rel_series.empty else np.nan,
-                "baseline": rel_series.expanding().mean().shift(1).iloc[-1] if len(rel_series) > 1 else rel_series.mean(),
-                "initial": rel_series.dropna().iloc[0] if rel_series.dropna().shape[0] else np.nan,
-                "best": rel_series.max() if not rel_series.empty else np.nan,
+                "current": current_rel if pd.notna(current_rel) else (rel_hist.iloc[-1] if not rel_hist.empty else np.nan),
+                "baseline": rel_hist.expanding().mean().shift(1).iloc[-1] if len(rel_hist) > 1 else (rel_hist.mean() if not rel_hist.empty else np.nan),
+                "initial": rel_hist.iloc[0] if not rel_hist.empty else np.nan,
+                "best": rel_hist.max() if not rel_hist.empty else np.nan,
             }
         else:
             refs["1RM_rel"] = {"current": np.nan, "baseline": np.nan, "initial": np.nan, "best": np.nan}
@@ -2492,57 +2502,28 @@ def render_results_cards(player_df, load_kg, body_mass=np.nan):
     html = '<div class="results-grid">' + ''.join(cards) + '</div>'
     st.markdown(html, unsafe_allow_html=True)
 
-def plot_player_results_trend(player_df, metric, selected_date, load_kg=None):
-    fig = go.Figure()
-    if metric == "1RM_est":
-        if pd.isna(load_kg):
-            fig.update_layout(title="1RM estimada · falta carga de sentadilla", height=280, margin=dict(l=10,r=10,t=40,b=10))
-            return fig
-        y = player_estimated_1rm_series(player_df, load_kg)
-        title = "1RM estimada"
-        y_title = "kg"
-        baseline = y.expanding().mean().shift(1)
-        best_value = y.max()
-    else:
-        y = pd.to_numeric(player_df[metric], errors="coerce")
-        baseline = pd.to_numeric(player_df.get(f"{metric}_baseline"), errors="coerce")
-        title = LABELS.get(metric, metric)
-        y_title = ""
-        best_value = y.max()
-
-    fig.add_trace(go.Scatter(x=player_df["Fecha"], y=y, mode="lines+markers", name="Valor actual", line=dict(width=3)))
-    if baseline is not None is not False:
-        fig.add_trace(go.Scatter(x=player_df["Fecha"], y=baseline, mode="lines", name="Baseline", line=dict(width=2, dash="dot")))
-    if pd.notna(best_value):
-        fig.add_hline(y=float(best_value), line_dash="dash", line_color="#16A34A")
-    sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
-    if not sel.empty:
-        sel_idx = sel.index[-1]
-        sel_y = y.loc[sel_idx] if sel_idx in y.index else y.iloc[-1]
-        fig.add_trace(go.Scatter(x=[sel["Fecha"].iloc[-1]], y=[sel_y], mode="markers", name="Fecha", marker=dict(size=12, color="#C62828", symbol="diamond")))
-    fig.update_layout(title=title, height=280, margin=dict(l=10,r=10,t=40,b=10), yaxis_title=y_title)
-    return fig
-
-def results_summary_text(player_df, load_kg=None, body_mass=np.nan):
+def results_summary_text(player_df, row, load_kg=None, body_mass=np.nan):
     msgs = []
     for metric in OBJECTIVE_METRICS:
-        ref = player_results_reference(player_df, metric)
-        pct = pct_change_safe(ref["current"], ref["baseline"])
+        current = row.get(metric, np.nan)
+        baseline = row.get(f"{metric}_baseline", np.nan)
+        pct = pct_change_safe(current, baseline)
         if pd.notna(pct):
             msgs.append((metric, pct))
     if pd.notna(load_kg):
-        est_series = player_estimated_1rm_series(player_df, load_kg)
-        if not est_series.dropna().empty:
-            baseline = est_series.expanding().mean().shift(1).iloc[-1] if len(est_series) > 1 else est_series.mean()
-            pct = pct_change_safe(est_series.iloc[-1], baseline)
-            if pd.notna(pct):
-                msgs.append(("1RM_est", pct))
-            if pd.notna(body_mass) and body_mass > 0:
-                rel_series = est_series / body_mass
-                rel_base = rel_series.expanding().mean().shift(1).iloc[-1] if len(rel_series) > 1 else rel_series.mean()
-                pct_rel = pct_change_safe(rel_series.iloc[-1], rel_base)
-                if pd.notna(pct_rel):
-                    msgs.append(("1RM_rel", pct_rel))
+        current_est = estimate_1rm_from_load_vmp(load_kg, row.get("VMP", np.nan))
+        est_series = player_estimated_1rm_series(player_df, load_kg).dropna()
+        est_base = est_series.expanding().mean().shift(1).iloc[-1] if len(est_series) > 1 else (est_series.mean() if not est_series.empty else np.nan)
+        pct = pct_change_safe(current_est, est_base)
+        if pd.notna(pct):
+            msgs.append(("1RM_est", pct))
+        if pd.notna(body_mass) and body_mass > 0:
+            current_rel = current_est / body_mass if pd.notna(current_est) else np.nan
+            rel_series = (player_estimated_1rm_series(player_df, load_kg) / body_mass).dropna()
+            rel_base = rel_series.expanding().mean().shift(1).iloc[-1] if len(rel_series) > 1 else (rel_series.mean() if not rel_series.empty else np.nan)
+            pct_rel = pct_change_safe(current_rel, rel_base)
+            if pd.notna(pct_rel):
+                msgs.append(("1RM_rel", pct_rel))
     if not msgs:
         return "Sin datos suficientes para resumir la evolución del jugador."
     msgs_sorted = sorted(msgs, key=lambda x: x[1], reverse=True)
@@ -2597,8 +2578,8 @@ def page_jugador(metrics_df):
     with d: st.plotly_chart(plot_objective_timeline(player_df, selected_date), use_container_width=True)
 
     st.markdown("### Resultados")
-    render_results_cards(player_df, load_kg, body_mass=body_mass)
-    st.markdown(f'<div class="soft-note">{results_summary_text(player_df, load_kg, body_mass=body_mass)}</div>', unsafe_allow_html=True)
+    render_results_cards(player_df, row, load_kg, body_mass=body_mass)
+    st.markdown(f'<div class="soft-note">{results_summary_text(player_df, row, load_kg, body_mass=body_mass)}</div>', unsafe_allow_html=True)
 
     st.markdown("### Respuesta intra-sesión · PRE vs POST")
     render_pre_post_cards(row)
@@ -2611,6 +2592,13 @@ def page_jugador(metrics_df):
         st.markdown(f'<div class="soft-note">CMJ post-pre: {cmj_delta_txt} · RSI post-pre: {rsi_delta_txt}.</div>', unsafe_allow_html=True)
         st.plotly_chart(plot_delta_timeline(player_df, "CMJ", selected_date), use_container_width=True)
         st.plotly_chart(plot_delta_timeline(player_df, "RSI_mod", selected_date), use_container_width=True)
+
+    st.markdown("### Histórico sesión a sesión · gráfico de velas")
+    y1, y2 = st.columns(2)
+    with y1:
+        st.plotly_chart(plot_session_candlestick(player_df, "CMJ", selected_date), use_container_width=True)
+    with y2:
+        st.plotly_chart(plot_session_candlestick(player_df, "RSI_mod", selected_date), use_container_width=True)
 
     st.markdown("### Gráficas principales por variable")
     for m in OBJECTIVE_METRICS:
