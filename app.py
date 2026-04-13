@@ -2680,11 +2680,8 @@ def page_informes(metrics_df):
         st.download_button("Descargar PDF entrenador", data=build_pdf_bytes_team_session(team_day, sel_date), file_name=f"informe_equipo_md1_{sel_date}.pdf", mime="application/pdf")
 
 def delete_session_by_date(date_str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM monitoring WHERE Fecha = ?", (date_str,))
-    conn.commit()
-    conn.close()
+    supabase = get_supabase()
+    supabase.table("monitoring").delete().eq("Fecha", date_str).execute()
 
 
 def page_admin(base_df):
