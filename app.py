@@ -1513,15 +1513,38 @@ def render_pre_post_cards(row):
     st.markdown(f'<div class="prepost-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 def plot_pre_post_current(row):
-    temp = pd.DataFrame({
-        "Métrica": ["CMJ", "RSI mod"],
-        "PRE": [row.get("CMJ", np.nan), row.get("RSI_mod", np.nan)],
-        "POST": [row.get("CMJ_post", np.nan), row.get("RSI_mod_post", np.nan)],
-    })
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["PRE"], name="PRE"))
-    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["POST"], name="POST"))
-    fig.update_layout(barmode="group", title="Comparación PRE vs POST · sesión seleccionada", height=320, margin=dict(l=10,r=10,t=40,b=10))
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=("CMJ · PRE vs POST", "RSI mod · PRE vs POST")
+    )
+
+    cmj_pre = pd.to_numeric(pd.Series([row.get("CMJ", np.nan)]), errors="coerce").iloc[0]
+    cmj_post = pd.to_numeric(pd.Series([row.get("CMJ_post", np.nan)]), errors="coerce").iloc[0]
+    rsi_pre = pd.to_numeric(pd.Series([row.get("RSI_mod", np.nan)]), errors="coerce").iloc[0]
+    rsi_post = pd.to_numeric(pd.Series([row.get("RSI_mod_post", np.nan)]), errors="coerce").iloc[0]
+
+    fig.add_trace(go.Bar(x=["PRE", "POST"], y=[cmj_pre, cmj_post], name="CMJ", showlegend=False), row=1, col=1)
+    fig.add_trace(go.Bar(x=["PRE", "POST"], y=[rsi_pre, rsi_post], name="RSI mod", showlegend=False), row=1, col=2)
+
+    cmj_vals = pd.Series([cmj_pre, cmj_post]).dropna()
+    if not cmj_vals.empty:
+        y_min = float(cmj_vals.min())
+        y_max = float(cmj_vals.max())
+        margin = (y_max - y_min) * 0.35 if y_max != y_min else max(abs(y_max) * 0.05, 1.0)
+        fig.update_yaxes(range=[max(0, y_min - margin), y_max + margin], row=1, col=1)
+
+    rsi_vals = pd.Series([rsi_pre, rsi_post]).dropna()
+    if not rsi_vals.empty:
+        y_min = float(rsi_vals.min())
+        y_max = float(rsi_vals.max())
+        margin = (y_max - y_min) * 0.60 if y_max != y_min else 0.05
+        fig.update_yaxes(range=[y_min - margin, y_max + margin], row=1, col=2)
+
+    fig.update_layout(
+        title="Comparación PRE vs POST · sesión seleccionada",
+        height=340,
+        margin=dict(l=10, r=10, t=55, b=10),
+    )
     return fig
 
 def plot_delta_timeline(player_df, metric, selected_date):
@@ -2553,6 +2576,86 @@ def plot_session_candlestick(player_df, metric, selected_date):
             xaxis_rangeslider_visible=False,
         )
         return fig
+
+    cols = ["Fecha", metric, post_col]
+    baseline_col = f"{metric}_baseline"
+    if baseline_col in player_df.columns:
+        cols.append(baseline_col)
+
+    temp = player_df[cols].copy()
+    temp = temp.dropna(subset=[metric, post_col], how="any")
+
+    if temp.empty:
+        fig.update_layout(
+            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+            height=320,
+            margin=dict(l=10, r=10, t=40, b=10),
+            xaxis_rangeslider_visible=False,
+        )
+        return fig
+
+    temp["open"] = pd.to_numeric(temp[metric], errors="coerce")
+    temp["close"] = pd.to_numeric(temp[post_col], errors="coerce")
+    temp["high"] = temp[["open", "close"]].max(axis=1)
+    temp["low"] = temp[["open", "close"]].min(axis=1)
+    temp["x_label"] = temp["Fecha"].dt.strftime("%d-%m-%Y")
+
+    fig.add_trace(go.Candlestick(
+        x=temp["x_label"],
+        open=temp["open"],
+        high=temp["high"],
+        low=temp["low"],
+        close=temp["close"],
+        name="Sesión",
+        increasing_line_color="#16A34A",
+        decreasing_line_color="#DC2626",
+        increasing_fillcolor="rgba(22,163,74,0.35)",
+        decreasing_fillcolor="rgba(220,38,38,0.35)",
+        whiskerwidth=0.5,
+    ))
+
+    baseline_vals = pd.Series(dtype=float)
+    if baseline_col in temp.columns:
+        baseline_vals = pd.to_numeric(temp[baseline_col], errors="coerce")
+        if baseline_vals.notna().any():
+            fig.add_trace(go.Scatter(
+                x=temp["x_label"],
+                y=baseline_vals,
+                mode="lines+markers",
+                name="Baseline PRE",
+                line=dict(color="#111827", width=4, dash="dash"),
+                marker=dict(size=6, color="#111827"),
+            ))
+
+    sel = temp[temp["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+    if not sel.empty:
+        fig.add_trace(go.Scatter(
+            x=[sel["x_label"].iloc[-1]],
+            y=[sel["high"].iloc[-1]],
+            mode="markers",
+            name="Fecha",
+            marker=dict(size=10, color="#1D4ED8", symbol="diamond")
+        ))
+
+    y_parts = [temp["open"], temp["close"], temp["high"], temp["low"]]
+    if baseline_vals.notna().any():
+        y_parts.append(baseline_vals)
+    y_values = pd.concat(y_parts).dropna()
+
+    if not y_values.empty:
+        y_min = float(y_values.min())
+        y_max = float(y_values.max())
+        margin = (y_max - y_min) * 0.35 if y_max != y_min else max(abs(y_max) * 0.05, 0.05)
+        fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
+    fig.update_layout(
+        title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+        height=340,
+        margin=dict(l=10, r=10, t=40, b=10),
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="v"),
+    )
+    return fig
 
     cols = ["Fecha", metric, post_col]
     baseline_col = f"{metric}_baseline"
