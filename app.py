@@ -2554,7 +2554,12 @@ def plot_session_candlestick(player_df, metric, selected_date):
         )
         return fig
 
-    temp = player_df[["Fecha", metric, post_col]].copy()
+    cols = ["Fecha", metric, post_col]
+    baseline_col = f"{metric}_baseline"
+    if baseline_col in player_df.columns:
+        cols.append(baseline_col)
+
+    temp = player_df[cols].copy()
     temp = temp.dropna(subset=[metric, post_col], how="any")
 
     if temp.empty:
@@ -2584,6 +2589,17 @@ def plot_session_candlestick(player_df, metric, selected_date):
         decreasing_fillcolor="rgba(220,38,38,0.35)",
         whiskerwidth=0.4,
     ))
+
+    if baseline_col in temp.columns:
+        baseline_vals = pd.to_numeric(temp[baseline_col], errors="coerce")
+        if baseline_vals.notna().any():
+            fig.add_trace(go.Scatter(
+                x=temp["Fecha"],
+                y=baseline_vals,
+                mode="lines",
+                name="Baseline PRE",
+                line=dict(color="#0F766E", width=2, dash="dot")
+            ))
 
     sel = temp[temp["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
     if not sel.empty:
