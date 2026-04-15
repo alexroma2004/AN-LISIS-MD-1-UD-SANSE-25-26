@@ -884,14 +884,37 @@ def page_force_reactivity(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Perfil fuerza-reactividad</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">RSI mod vs 1RM relativa estimada</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Comparación de la reactividad y la fuerza relativa del equipo con perfiles por cuadrantes.</div></div>', unsafe_allow_html=True)
 
-    dates = sorted(metrics_df["Fecha"].dropna().unique())
-    if not dates:
+        sessions = (
+        metrics_df[["Fecha", "Microciclo"]]
+        .dropna(subset=["Fecha"])
+        .drop_duplicates()
+        .sort_values(["Fecha", "Microciclo"])
+        .reset_index(drop=True)
+    )
+    if sessions.empty:
         st.info("No hay fechas disponibles.")
         return
-    opts = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in dates]
-    selected_date = pd.to_datetime(st.selectbox("Fecha de análisis del perfil", opts, index=len(opts)-1, key="fr_date"))
+
+    sessions["session_label"] = sessions.apply(
+        lambda r: format_session_label(r["Fecha"], r.get("Microciclo", np.nan)),
+        axis=1
+    )
+
+    selected_label = st.selectbox(
+        "Fecha de análisis del perfil",
+        sessions["session_label"].tolist(),
+        index=len(sessions) - 1,
+        key="fr_date"
+    )
+
+    session_row = sessions[sessions["session_label"] == selected_label].iloc[-1]
+    selected_date = pd.to_datetime(session_row["Fecha"])
+    selected_micro = session_row.get("Microciclo", np.nan)
 
     fr_df, profiles_df, profiles_err, rsi_ref, rel_ref = build_force_reactivity_df(metrics_df, selected_date)
+
+    if "Microciclo" in fr_df.columns:
+        fr_df = fr_df[fr_df["Microciclo"] == selected_micro].copy()
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
