@@ -320,9 +320,12 @@ def upsert_monitoring(df):
         })
     supabase.table("monitoring").upsert(rows, on_conflict="Fecha,Jugador").execute()
 
-def delete_session_by_date(date_str):
+def delete_session_by_date(date_str, micro=None):
     supabase = get_supabase()
-    supabase.table("monitoring").delete().eq("Fecha", date_str).execute()
+    q = supabase.table("monitoring").delete().eq("Fecha", date_str)
+    if micro is not None and str(micro).strip() != "" and str(micro).strip().upper() != "NA":
+        q = q.eq("Microciclo", micro)
+    q.execute()
 
 
 def load_player_profiles():
@@ -884,42 +887,37 @@ def page_force_reactivity(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Perfil fuerza-reactividad</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">RSI mod vs 1RM relativa estimada</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Comparación de la reactividad y la fuerza relativa del equipo con perfiles por cuadrantes.</div></div>', unsafe_allow_html=True)
 
-       sessions = (
+    sessions = (
         metrics_df[["Fecha", "Microciclo"]]
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
         .reset_index(drop=True)
     )
-
     if sessions.empty:
         st.info("No hay fechas disponibles.")
         return
-
     sessions["session_label"] = sessions.apply(
         lambda r: format_session_label(r["Fecha"], r.get("Microciclo", np.nan)),
         axis=1
     )
-
     selected_label = st.selectbox(
         "Fecha de análisis del perfil",
         sessions["session_label"].tolist(),
         index=len(sessions) - 1,
         key="fr_date"
     )
-
     session_row = sessions[sessions["session_label"] == selected_label].iloc[-1]
     selected_date = pd.to_datetime(session_row["Fecha"])
     selected_micro = session_row.get("Microciclo", np.nan)
 
     fr_df, profiles_df, profiles_err, rsi_ref, rel_ref = build_force_reactivity_df(metrics_df, selected_date)
-
     if "Microciclo" in fr_df.columns:
         fr_df = fr_df[fr_df["Microciclo"] == selected_micro].copy()
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        kpi("Jugadores del día", fr_df["Jugador"].nunique(), selected_date.strftime("%Y-%m-%d"))
+        kpi("Jugadores del día", fr_df["Jugador"].nunique(), format_session_label(selected_date, selected_micro))
     valid = fr_df.dropna(subset=["RSI_mod", "est_1rm_rel"]).copy()
     with c2:
         kpi("Con perfil calculado", len(valid), "peso + carga completos")
@@ -3189,11 +3187,24 @@ def page_admin(base_df):
     with c3: kpi("Fechas", base_df["Fecha"].nunique(), "controles")
     st.download_button("Descargar base CSV", data=base_df.to_csv(index=False).encode("utf-8"), file_name="md1_staff_elite_definitiva_v2.csv", mime="text/csv")
     st.markdown("### Eliminar una sesión")
-    date_opts = sorted(base_df["Fecha"].dropna().dt.strftime("%Y-%m-%d").unique().tolist())
-    if date_opts:
-        selected_delete = st.selectbox("Selecciona la sesión/fecha a eliminar", date_opts)
+    session_opts = (
+        base_df[["Fecha", "Microciclo"]]
+        .dropna(subset=["Fecha"])
+        .drop_duplicates()
+        .sort_values(["Fecha", "Microciclo"])
+        .reset_index(drop=True)
+    )
+    if not session_opts.empty:
+        session_opts["session_label"] = session_opts.apply(
+            lambda r: format_session_label(r["Fecha"], r.get("Microciclo", np.nan)),
+            axis=1
+        )
+        selected_delete = st.selectbox("Selecciona la sesión/fecha a eliminar", session_opts["session_label"].tolist())
+        selected_row = session_opts[session_opts["session_label"] == selected_delete].iloc[-1]
+        selected_delete_date = pd.to_datetime(selected_row["Fecha"]).strftime("%Y-%m-%d")
+        selected_delete_micro = selected_row.get("Microciclo", np.nan)
         if st.button("Eliminar sesión seleccionada", type="secondary"):
-            delete_session_by_date(selected_delete)
+            delete_session_by_date(selected_delete_date, selected_delete_micro)
             st.success(f"Sesión {selected_delete} eliminada.")
             st.rerun()
     else:
