@@ -888,7 +888,7 @@ def page_force_reactivity(metrics_df):
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Perfil fuerza-reactividad</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">RSI mod vs 1RM relativa estimada</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Comparación de la reactividad y la fuerza relativa del equipo con perfiles por cuadrantes.</div></div>', unsafe_allow_html=True)
 
     sessions = (
-        metrics_df[["Fecha", "Microciclo"]]
+        metrics_df[["Fecha", "Microciclo"]].assign(Microciclo=lambda d: d["Microciclo"].fillna("MD-1").replace({"NA":"MD-1","N/A":"MD-1"}))
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
@@ -2529,7 +2529,9 @@ def page_cargar():
 def format_session_label(fecha, micro):
     fecha_txt = pd.to_datetime(fecha, errors="coerce")
     fecha_txt = fecha_txt.strftime("%d-%m-%Y") if pd.notna(fecha_txt) else "Sin fecha"
-    micro_txt = str(micro).strip() if pd.notna(micro) and str(micro).strip() != "" else "NA"
+    micro_txt = str(micro).strip() if pd.notna(micro) and str(micro).strip() != "" else "MD-1"
+    if micro_txt.upper() in ["NA", "N/A", "NONE"]:
+        micro_txt = "MD-1"
     return f"{fecha_txt} {micro_txt}"
 
 
@@ -2541,7 +2543,7 @@ def page_equipo(metrics_df):
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Monitorización neuromuscular MD-1</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">Equipo</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Lectura global del estado del grupo en MD-1.</div></div>', unsafe_allow_html=True)
 
     sessions = (
-        metrics_df[["Fecha", "Microciclo"]]
+        metrics_df[["Fecha", "Microciclo"]].assign(Microciclo=lambda d: d["Microciclo"].fillna("MD-1").replace({"NA":"MD-1","N/A":"MD-1"}))
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
