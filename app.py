@@ -2575,6 +2575,99 @@ def trend_class(pct):
         return "result-down", f"{pct:.1f}%"
     return "result-neutral", f"{pct:.1f}%"
 
+def build_same_microcycle_summary(player_df, row):
+    micro = row.get("Microciclo", np.nan)
+    out = []
+    if pd.isna(micro) or "Microciclo" not in player_df.columns:
+        return pd.DataFrame(columns=["Metrica", "Actual", "Pct_global", "Ref_micro", "Pct_micro", "N_hist", "Microciclo"])
+
+    ref_pool = player_df[
+        (player_df["Microciclo"] == micro) &
+        (pd.to_datetime(player_df["Fecha"], errors="coerce") < pd.to_datetime(row.get("Fecha"), errors="coerce"))
+    ].copy()
+
+    for metric in OBJECTIVE_METRICS:
+        actual = pd.to_numeric(pd.Series([row.get(metric, np.nan)]), errors="coerce").iloc[0]
+        pct_global = pd.to_numeric(pd.Series([row.get(f"{metric}_pct_vs_baseline", np.nan)]), errors="coerce").iloc[0]
+        hist_vals = pd.to_numeric(ref_pool.get(metric, pd.Series(dtype=float)), errors="coerce").dropna()
+
+        ref_micro = hist_vals.mean() if len(hist_vals) > 0 else np.nan
+        pct_micro = pct_change_safe(actual, ref_micro)
+
+        out.append({
+            "Metrica": metric,
+            "Actual": actual,
+            "Pct_global": pct_global,
+            "Ref_micro": ref_micro,
+            "Pct_micro": pct_micro,
+            "N_hist": int(len(hist_vals)),
+            "Microciclo": micro,
+        })
+    return pd.DataFrame(out)
+
+def render_same_microcycle_cards(summary_df):
+    if summary_df.empty:
+        st.info("No hay referencia suficiente para comparar esta sesión con el mismo día del microciclo.")
+        return
+
+    decimals = {"CMJ": 1, "RSI_mod": 3, "VMP": 3}
+    suffix = {"CMJ": " cm", "RSI_mod": "", "VMP": " m/s"}
+
+    cards = []
+    for _, r in summary_df.iterrows():
+        metric = r["Metrica"]
+        css_g, txt_g = trend_class(r["Pct_global"])
+        css_m, txt_m = trend_class(r["Pct_micro"])
+
+        actual_txt = "—" if pd.isna(r["Actual"]) else f'{r["Actual"]:.{decimals.get(metric, 2)}f}{suffix.get(metric, "")}'
+        ref_txt = "—" if pd.isna(r["Ref_micro"]) else f'{r["Ref_micro"]:.{decimals.get(metric, 2)}f}{suffix.get(metric, "")}'
+        n_txt = f'{int(r["N_hist"])}'
+
+        cards.append(
+            f'<div class="result-card">'
+            f'<div class="lab">{LABELS.get(metric, metric)}</div>'
+            f'<div class="big">{actual_txt}</div>'
+            f'<div class="mini"><span class="{css_g}">{txt_g} vs baseline global</span></div>'
+            f'<div class="mini"><span class="{css_m}">{txt_m} vs su histórico {r["Microciclo"]}</span></div>'
+            f'<div class="mini">ref. {r["Microciclo"]}: <b>{ref_txt}</b> · n = <b>{n_txt}</b></div>'
+            f'</div>'
+        )
+
+    html = '<div class="results-grid">' + ''.join(cards) + '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+def plot_same_microcycle_compare(summary_df):
+    fig = go.Figure()
+    if summary_df.empty:
+        fig.update_layout(
+            title="Comparación vs baseline global y vs mismo día del microciclo",
+            height=320, margin=dict(l=10, r=10, t=40, b=10)
+        )
+        return fig
+
+    x = [LABELS.get(m, m) for m in summary_df["Metrica"]]
+    y_global = pd.to_numeric(summary_df["Pct_global"], errors="coerce")
+    y_micro = pd.to_numeric(summary_df["Pct_micro"], errors="coerce")
+
+    fig.add_trace(go.Bar(x=x, y=y_global, name="% vs baseline global"))
+    fig.add_trace(go.Bar(x=x, y=y_micro, name="% vs mismo día microciclo"))
+
+    all_vals = pd.concat([y_global, y_micro]).dropna()
+    if not all_vals.empty:
+        y_min = float(all_vals.min())
+        y_max = float(all_vals.max())
+        margin = (y_max - y_min) * 0.25 if y_max != y_min else max(abs(y_max) * 0.10, 1.0)
+        fig.update_yaxes(range=[min(y_min - margin, -1), max(y_max + margin, 1)])
+
+    fig.add_hline(y=0, line_dash="dot", line_color="#111827")
+    fig.update_layout(
+        barmode="group",
+        title="Comparación vs baseline global y vs mismo día del microciclo",
+        height=320,
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
 def player_estimated_1rm_series(player_df, load_kg):
     ser = player_df["VMP"].apply(lambda x: estimate_1rm_from_load_vmp(load_kg, x))
     return pd.to_numeric(ser, errors="coerce")
@@ -2872,6 +2965,20 @@ def page_jugador(metrics_df):
     st.markdown("### Resultados")
     render_results_cards(player_df, row, load_kg, body_mass=body_mass)
     st.markdown(f'<div class="soft-note">{results_summary_text(player_df, row, load_kg, body_mass=body_mass)}</div>', unsafe_allow_html=True)
+
+    st.markdown("### Comparación específica del mismo día del microciclo")
+    same_micro_df = build_same_microcycle_summary(player_df, row)
+    render_same_microcycle_cards(same_micro_df)
+    if not same_micro_df.empty:
+        micro_name = same_micro_df["Microciclo"].iloc[0]
+        valid_n = int(same_micro_df["N_hist"].max())
+        st.markdown(
+            f'<div class="soft-note">Lectura específica del día: la sesión seleccionada se compara, además de con su baseline global, con el histórico previo del jugador en <b>{micro_name}</b>. Referencias disponibles: <b>{valid_n}</b>.</div>',
+            unsafe_allow_html=True
+        )
+        st.plotly_chart(plot_same_microcycle_compare(same_micro_df), use_container_width=True)
+    else:
+        st.info("Aún no hay suficientes sesiones previas de este mismo día del microciclo para construir esa referencia.")
 
     st.markdown("### Respuesta intra-sesión · PRE vs POST")
     render_pre_post_cards(row)
