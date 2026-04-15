@@ -2503,6 +2503,14 @@ def page_cargar():
         except Exception as e:
             st.error(f"No se pudo interpretar el archivo: {e}")
 
+
+def format_session_label(fecha, micro):
+    fecha_txt = pd.to_datetime(fecha, errors="coerce")
+    fecha_txt = fecha_txt.strftime("%d-%m-%Y") if pd.notna(fecha_txt) else "Sin fecha"
+    micro_txt = str(micro).strip() if pd.notna(micro) and str(micro).strip() != "" else "NA"
+    return f"{fecha_txt} {micro_txt}"
+
+
 def page_equipo(metrics_df):
     if metrics_df.empty:
         st.info("No hay datos disponibles.")
@@ -2510,13 +2518,26 @@ def page_equipo(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Monitorización neuromuscular MD-1</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">Equipo</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Lectura global del estado del grupo en MD-1.</div></div>', unsafe_allow_html=True)
 
-    dates = sorted(metrics_df["Fecha"].dropna().unique())
-    opts = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in dates]
-    selected_date = pd.to_datetime(st.selectbox("Fecha de análisis", opts, index=len(opts)-1))
-    team_day = metrics_df[metrics_df["Fecha"].dt.normalize() == selected_date.normalize()].copy()
+    sessions = (
+        metrics_df[["Fecha", "Microciclo"]]
+        .dropna(subset=["Fecha"])
+        .drop_duplicates()
+        .sort_values(["Fecha", "Microciclo"])
+        .reset_index(drop=True)
+    )
+    sessions["session_label"] = sessions.apply(lambda r: format_session_label(r["Fecha"], r.get("Microciclo", np.nan)), axis=1)
+    selected_label = st.selectbox("Fecha de análisis", sessions["session_label"].tolist(), index=len(sessions)-1)
+    session_row = sessions[sessions["session_label"] == selected_label].iloc[-1]
+    selected_date = pd.to_datetime(session_row["Fecha"])
+    selected_micro = session_row.get("Microciclo", np.nan)
+
+    team_day = metrics_df[
+        (metrics_df["Fecha"].dt.normalize() == selected_date.normalize()) &
+        ((metrics_df["Microciclo"] == selected_micro) if "Microciclo" in metrics_df.columns else True)
+    ].copy()
 
     c1,c2,c3,c4,c5,c6,c7 = st.columns(7)
-    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), f"{team_day['Jugador'].nunique()} jugadores · {team_day['Microciclo'].dropna().iloc[0] if 'Microciclo' in team_day.columns and team_day['Microciclo'].notna().any() else 'NA'}")
+    with c1: kpi("Fecha", selected_date.strftime("%Y-%m-%d"), f"{team_day['Jugador'].nunique()} jugadores · {selected_micro if pd.notna(selected_micro) else 'NA'}")
     with c2: kpi("Readiness media", f"{team_day['readiness_score'].mean():.1f}", "0-100")
     with c3: kpi("Objective loss medio", f"{team_day['objective_loss_score'].mean():.2f}", "0-3")
     with c4: kpi("Pérdida media %", f"{team_day['objective_loss_mean_pct'].mean():.1f}%", "grupo")
@@ -2924,10 +2945,23 @@ def page_jugador(metrics_df):
     st.markdown('<div class="section-title">Jugador</div>', unsafe_allow_html=True)
     players = sorted(metrics_df["Jugador"].dropna().unique().tolist())
     player = st.selectbox("Selecciona jugador", players)
-    player_df = metrics_df[metrics_df["Jugador"] == player].copy().sort_values("Fecha")
-    opts = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in player_df["Fecha"].dropna().unique()]
-    selected_date = pd.to_datetime(st.selectbox("Fecha del jugador", opts, index=len(opts)-1))
-    current = player_df[player_df["Fecha"].dt.normalize() == selected_date.normalize()]
+    player_df = metrics_df[metrics_df["Jugador"] == player].copy().sort_values(["Fecha", "Microciclo"])
+    player_sessions = (
+        player_df[["Fecha", "Microciclo"]]
+        .dropna(subset=["Fecha"])
+        .drop_duplicates()
+        .sort_values(["Fecha", "Microciclo"])
+        .reset_index(drop=True)
+    )
+    player_sessions["session_label"] = player_sessions.apply(lambda r: format_session_label(r["Fecha"], r.get("Microciclo", np.nan)), axis=1)
+    selected_label = st.selectbox("Fecha del jugador", player_sessions["session_label"].tolist(), index=len(player_sessions)-1)
+    session_row = player_sessions[player_sessions["session_label"] == selected_label].iloc[-1]
+    selected_date = pd.to_datetime(session_row["Fecha"])
+    selected_micro = session_row.get("Microciclo", np.nan)
+    current = player_df[
+        (player_df["Fecha"].dt.normalize() == selected_date.normalize()) &
+        ((player_df["Microciclo"] == selected_micro) if "Microciclo" in player_df.columns else True)
+    ]
     row = current.iloc[-1] if not current.empty else player_df.iloc[-1]
 
     profiles_df, _profiles_err = load_player_profiles()
