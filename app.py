@@ -1554,15 +1554,49 @@ def progressive_filtered_baseline(group, metric):
     out = []
     full_mean = pd.to_numeric(group[metric], errors="coerce").mean()
     has_micro = "Microciclo" in group.columns
+
     for i in range(len(group)):
         prev = group.iloc[:i].copy()
-        if has_micro:
-            prev = prev[prev["Microciclo"].isin(VALID_BASELINE_DAYS)]
-        vals = pd.to_numeric(prev[metric], errors="coerce").dropna()
-        if len(vals) > 0:
-            out.append(vals.mean())
-        else:
+        vals_prev = pd.to_numeric(prev[metric], errors="coerce")
+
+        if prev.empty:
             out.append(full_mean)
+            continue
+
+        if not has_micro:
+            vals = vals_prev.dropna()
+            out.append(vals.mean() if len(vals) > 0 else full_mean)
+            continue
+
+        prev = prev[prev["Microciclo"].isin(VALID_BASELINE_DAYS)].copy()
+        if prev.empty:
+            out.append(full_mean)
+            continue
+
+        prev[metric] = pd.to_numeric(prev[metric], errors="coerce")
+
+        # 1) MD-1 siempre incluido
+        md1_vals = prev.loc[prev["Microciclo"] == "MD-1", metric].dropna().tolist()
+
+        # Si todavía no hay MD-1 histórico, mantenemos el comportamiento de respaldo
+        if len(md1_vals) == 0:
+            vals = prev[metric].dropna()
+            out.append(vals.mean() if len(vals) > 0 else full_mean)
+            continue
+
+        included = md1_vals.copy()
+        provisional = float(pd.Series(included).mean())
+
+        # 2) MD-4, MD-3 y MD-2 solo si están en >= -5% respecto a la baseline provisional
+        aux_days = prev[prev["Microciclo"].isin(["MD-4", "MD-3", "MD-2"])][metric].dropna().tolist()
+        for v in aux_days:
+            pct_loss = ((v - provisional) / provisional) * 100 if provisional not in [0, np.nan] else np.nan
+            if pd.notna(pct_loss) and pct_loss >= -5:
+                included.append(v)
+                provisional = float(pd.Series(included).mean())
+
+        out.append(float(pd.Series(included).mean()) if len(included) > 0 else full_mean)
+
     return pd.Series(out, index=group.index)
 
 def progressive_ma3_by_cycle(group, metric):
