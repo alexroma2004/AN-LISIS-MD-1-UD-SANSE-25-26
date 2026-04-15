@@ -884,13 +884,14 @@ def page_force_reactivity(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Perfil fuerza-reactividad</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">RSI mod vs 1RM relativa estimada</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Comparación de la reactividad y la fuerza relativa del equipo con perfiles por cuadrantes.</div></div>', unsafe_allow_html=True)
 
-        sessions = (
+       sessions = (
         metrics_df[["Fecha", "Microciclo"]]
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
         .reset_index(drop=True)
     )
+
     if sessions.empty:
         st.info("No hay fechas disponibles.")
         return
