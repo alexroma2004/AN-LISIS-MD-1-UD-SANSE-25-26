@@ -431,7 +431,14 @@ def plot_force_reactivity_scatter(df, rsi_ref, rel_ref):
     plot_df = df.dropna(subset=["RSI_mod", "est_1rm_rel"]).copy()
 
     if plot_df.empty:
-        fig.update_layout(height=520, margin=dict(l=10, r=10, t=40, b=10), title="Perfil fuerza-reactividad")
+        # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
+    fig.update_layout(height=520, margin=dict(l=10, r=10, t=40, b=10), title="Perfil fuerza-reactividad")
         return fig
 
     for profile_name in ["Avión", "Tanque", "Elástico", "Base por desarrollar"]:
@@ -472,6 +479,13 @@ def plot_force_reactivity_scatter(df, rsi_ref, rel_ref):
         fig.add_annotation(x=x_min, y=y_max, text="TANQUE", showarrow=False, xanchor="left", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Tanque"]))
         fig.add_annotation(x=x_max, y=y_min, text="ELÁSTICO", showarrow=False, xanchor="right", yanchor="bottom", font=dict(size=13, color=FORCE_PROFILE_COLORS["Elástico"]))
         fig.add_annotation(x=x_min, y=y_min, text="BASE POR DESARROLLAR", showarrow=False, xanchor="left", yanchor="bottom", font=dict(size=12, color=FORCE_PROFILE_COLORS["Base por desarrollar"]))
+
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
 
     fig.update_layout(
         title="RSI modificado vs 1RM relativa estimada",
@@ -729,7 +743,14 @@ def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None,
     fig = go.Figure()
     plot_df = df.dropna(subset=["RSI_mod", "est_1rm_rel"]).copy()
     if plot_df.empty:
-        fig.update_layout(height=560, title="RSI modificado vs 1RM relativa estimada")
+        # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
+    fig.update_layout(height=560, title="RSI modificado vs 1RM relativa estimada")
         return fig
 
     for profile_name in ["Avión", "Tanque", "Elástico", "Base por desarrollar"]:
@@ -770,6 +791,13 @@ def plot_force_reactivity_filtered(df, rsi_ref, rel_ref, selected_profiles=None,
         fig.add_annotation(x=x_min, y=y_max, text="TANQUE", showarrow=False, xanchor="left", yanchor="top", font=dict(size=13, color=FORCE_PROFILE_COLORS["Tanque"]))
         fig.add_annotation(x=x_max, y=y_min, text="ELÁSTICO", showarrow=False, xanchor="right", yanchor="bottom", font=dict(size=13, color=FORCE_PROFILE_COLORS["Elástico"]))
         fig.add_annotation(x=x_min, y=y_min, text="BASE POR DESARROLLAR", showarrow=False, xanchor="left", yanchor="bottom", font=dict(size=12, color=FORCE_PROFILE_COLORS["Base por desarrollar"]))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title="RSI modificado vs 1RM relativa estimada", height=560, margin=dict(l=10, r=10, t=45, b=10), legend_title="Perfil")
     return fig
 
@@ -824,6 +852,13 @@ def plot_team_priority_bar(team_summary):
         title="Prioridades de trabajo del grupo"
     )
     fig.update_traces(textposition="outside")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), xaxis_title="", yaxis_title="Jugadores")
     return fig
 
@@ -837,6 +872,13 @@ def plot_balance_donut(team_summary):
         hole=0.55,
         title="Distribución del equilibrio del equipo"
     )
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(height=320, margin=dict(l=10,r=10,t=45,b=10), legend_title="")
     return fig
 
@@ -1513,38 +1555,22 @@ def render_pre_post_cards(row):
     st.markdown(f'<div class="prepost-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
 
 def plot_pre_post_current(row):
-    fig = make_subplots(
-        rows=1, cols=2,
-        subplot_titles=("CMJ · PRE vs POST", "RSI mod · PRE vs POST")
-    )
+    temp = pd.DataFrame({
+        "Métrica": ["CMJ", "RSI mod"],
+        "PRE": [row.get("CMJ", np.nan), row.get("RSI_mod", np.nan)],
+        "POST": [row.get("CMJ_post", np.nan), row.get("RSI_mod_post", np.nan)],
+    })
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["PRE"], name="PRE"))
+    fig.add_trace(go.Bar(x=temp["Métrica"], y=temp["POST"], name="POST"))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
 
-    cmj_pre = pd.to_numeric(pd.Series([row.get("CMJ", np.nan)]), errors="coerce").iloc[0]
-    cmj_post = pd.to_numeric(pd.Series([row.get("CMJ_post", np.nan)]), errors="coerce").iloc[0]
-    rsi_pre = pd.to_numeric(pd.Series([row.get("RSI_mod", np.nan)]), errors="coerce").iloc[0]
-    rsi_post = pd.to_numeric(pd.Series([row.get("RSI_mod_post", np.nan)]), errors="coerce").iloc[0]
-
-    fig.add_trace(go.Bar(x=["PRE", "POST"], y=[cmj_pre, cmj_post], name="CMJ", showlegend=False), row=1, col=1)
-    fig.add_trace(go.Bar(x=["PRE", "POST"], y=[rsi_pre, rsi_post], name="RSI mod", showlegend=False), row=1, col=2)
-
-    cmj_vals = pd.Series([cmj_pre, cmj_post]).dropna()
-    if not cmj_vals.empty:
-        y_min = float(cmj_vals.min())
-        y_max = float(cmj_vals.max())
-        margin = (y_max - y_min) * 0.35 if y_max != y_min else max(abs(y_max) * 0.05, 1.0)
-        fig.update_yaxes(range=[max(0, y_min - margin), y_max + margin], row=1, col=1)
-
-    rsi_vals = pd.Series([rsi_pre, rsi_post]).dropna()
-    if not rsi_vals.empty:
-        y_min = float(rsi_vals.min())
-        y_max = float(rsi_vals.max())
-        margin = (y_max - y_min) * 0.60 if y_max != y_min else 0.05
-        fig.update_yaxes(range=[y_min - margin, y_max + margin], row=1, col=2)
-
-    fig.update_layout(
-        title="Comparación PRE vs POST · sesión seleccionada",
-        height=340,
-        margin=dict(l=10, r=10, t=55, b=10),
-    )
+    fig.update_layout(barmode="group", title="Comparación PRE vs POST · sesión seleccionada", height=320, margin=dict(l=10,r=10,t=40,b=10))
     return fig
 
 def plot_delta_timeline(player_df, metric, selected_date):
@@ -1556,6 +1582,13 @@ def plot_delta_timeline(player_df, metric, selected_date):
     if not sel.empty:
         val = sel.iloc[-1].get(f"{metric}_delta_pct", np.nan)
         fig.add_trace(go.Scatter(x=[sel.iloc[-1]["Fecha"]], y=[val], mode="markers", name="Fecha", marker=dict(size=12, color="#C62828", symbol="diamond")))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title=f"{LABELS.get(metric, metric)} · Δ % POST vs PRE", height=300, margin=dict(l=10,r=10,t=40,b=10))
     return fig
 
@@ -1569,6 +1602,13 @@ def plot_team_pre_post_delta(team_df):
     fig = px.bar(temp, x="Métrica", y="Delta_pct", text="Delta_pct", title="Respuesta media PRE → POST del equipo")
     fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
     fig.add_hline(y=0, line_dash="dot")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(height=320, margin=dict(l=10,r=10,t=40,b=10), yaxis_title="%")
     return fig
 def progressive_filtered_baseline(group, metric):
@@ -1598,6 +1638,106 @@ def progressive_ma3_by_cycle(group, metric):
 def compute_metrics(df):
     if df.empty:
         return df.copy()
+    sort_cols = ["Jugador","Fecha"] + (["Microciclo"] if "Microciclo" in df.columns else [])
+    df = df.copy().sort_values(sort_cols).reset_index(drop=True)
+
+    # =========================
+    # MÉTRICAS 100% INDIVIDUALES
+    # =========================
+    for metric in ALL_METRICS:
+        df[f"{metric}_baseline"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_filtered_baseline(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+        df[f"{metric}_pct_vs_baseline"] = np.where(
+            df[f"{metric}_baseline"].notna() & (df[f"{metric}_baseline"] != 0),
+            (df[metric] - df[f"{metric}_baseline"]) / df[f"{metric}_baseline"] * 100,
+            np.nan,
+        )
+
+        df[f"{metric}_ma3"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_ma3_by_cycle(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+    # Severidad, loss score y readiness SOLO desde la referencia individual
+    for metric in OBJECTIVE_METRICS:
+        sev = df[f"{metric}_pct_vs_baseline"].apply(severity_from_pct)
+        df[f"{metric}_severity"] = sev.apply(lambda x: x[0])
+        df[f"{metric}_severity_points"] = sev.apply(lambda x: x[1])
+
+    df["n_leve"] = sum((df[f"{m}_severity"] == "Fatiga leve").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_mod"] = sum((df[f"{m}_severity"] == "Fatiga moderada").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_crit"] = sum((df[f"{m}_severity"] == "Fatiga crítica").astype(int) for m in OBJECTIVE_METRICS)
+
+    df["objective_loss_score"] = df[[f"{m}_severity_points" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["objective_loss_mean_pct"] = df[[f"{m}_pct_vs_baseline" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["risk_label"] = df.apply(lambda r: classify_risk_from_counts(int(r["n_leve"]), int(r["n_mod"]), int(r["n_crit"])), axis=1)
+    df["readiness_score"] = np.clip(100 - (df["objective_loss_score"] / 3.0) * 100, 0, 100)
+
+    df["objective_loss_score_ma3"] = df.groupby("Jugador")["objective_loss_score"].transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+
+    trend_slopes = []
+    for _, g in df.groupby("Jugador"):
+        vals = g["objective_loss_score"].tolist()
+        local = []
+        for i in range(len(vals)):
+            local.append(slope_last_n(vals[: i + 1], n=3))
+        trend_slopes.extend(local)
+    df["objective_loss_slope_3"] = trend_slopes
+    df["trend_label"] = df["objective_loss_slope_3"].apply(trend_label_from_slope)
+
+    # =========================
+    # MÉTRICAS CONTEXTUALES (EQUIPO)
+    # =========================
+    team = df.groupby("Fecha")[OBJECTIVE_METRICS].agg(["mean", "std"]).reset_index()
+    team.columns = ["Fecha"] + [f"{m}_{stat}" for m, stat in team.columns.tolist()[1:]]
+    df = df.merge(team, on="Fecha", how="left")
+
+    for m in OBJECTIVE_METRICS:
+        df[f"{m}_team_mean"] = pd.to_numeric(df[f"{m}_mean"], errors="coerce")
+        df[f"{m}_team_std"] = pd.to_numeric(df[f"{m}_std"], errors="coerce").replace(0, np.nan)
+
+        df[f"{m}_vs_team_pct"] = np.where(
+            df[f"{m}_team_mean"].notna() & (df[f"{m}_team_mean"] != 0),
+            (df[m] - df[f"{m}_team_mean"]) / df[f"{m}_team_mean"] * 100,
+            np.nan,
+        )
+
+        # Z-score contextual respecto al equipo en esa fecha
+        df[f"{m}_z"] = np.where(
+            df[f"{m}_team_std"].notna(),
+            (df[m] - df[f"{m}_team_mean"]) / df[f"{m}_team_std"],
+            np.nan,
+        )
+
+        df[f"{m}_team_rank"] = df.groupby("Fecha")[m].rank(method="min", ascending=True)
+
+    # Z-score objetivo contextual (media de z-scores de las métricas objetivas)
+    df["objective_z_score"] = df[[f"{m}_z" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+
+    for metric in ["objective_loss_score", "readiness_score"]:
+        asc = metric != "readiness_score"
+        df[f"{metric}_team_rank"] = df.groupby("Fecha")[metric].rank(method="min", ascending=asc)
+
+    perc = {m: [] for m in OBJECTIVE_METRICS}
+    for _, g in df.groupby("Jugador"):
+        g = g.sort_values("Fecha")
+        for _, r in g.iterrows():
+            hist = g[g["Fecha"] <= r["Fecha"]]
+            for m in OBJECTIVE_METRICS:
+                perc[m].append(historical_percentile(hist, r[m], m))
+    for m in OBJECTIVE_METRICS:
+        df[f"{m}_historical_percentile"] = perc[m]
+
+    drop_aux = [f"{m}_mean" for m in OBJECTIVE_METRICS] + [f"{m}_std" for m in OBJECTIVE_METRICS]
+    df = df.drop(columns=[c for c in drop_aux if c in df.columns])
+
+    df = compute_pre_post_fields(df)
+    return df.copy()
     sort_cols = ["Jugador","Fecha"] + (["Microciclo"] if "Microciclo" in df.columns else [])
     df = df.copy().sort_values(sort_cols).reset_index(drop=True)
 
@@ -1827,6 +1967,13 @@ def improved_radar(row):
     scores_closed = scores + [scores[0]]
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(r=scores_closed, theta=labels_closed, fill="toself", line=dict(color="#1F4E79", width=3), fillcolor="rgba(31,78,121,0.28)", name="Actual"))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0,100], tickvals=[15,40,65,85,100], ticktext=["Crítica","Moderada","Leve","Óptimo","Máx"])), showlegend=False, title="Radar de estado neuromuscular", height=360, margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1847,6 +1994,13 @@ def radar_current_vs_baseline(row):
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(r=baseline_scores + [baseline_scores[0]], theta=labels_closed, fill="toself", line=dict(color="#98A2B3", width=2, dash="dash"), fillcolor="rgba(152,162,179,0.10)", name="Baseline visual"))
     fig.add_trace(go.Scatterpolar(r=current_scores + [current_scores[0]], theta=labels_closed, fill="toself", line=dict(color="#1F4E79", width=3), fillcolor="rgba(31,78,121,0.28)", name="Actual"))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0,100], tickvals=[15,40,65,85,100], ticktext=["Crítica","Moderada","Leve","Óptimo","Máx"])), title="Actual vs baseline visual", height=360, margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1898,6 +2052,13 @@ def radar_relative_loss(row):
         text=hover_closed,
         hovertemplate="%{text}<extra></extra>"
     ))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(
         polar=dict(
             radialaxis=dict(
@@ -1922,6 +2083,13 @@ def plot_metric_main(player_df, metric, selected_date):
     sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
     if not sel.empty:
         fig.add_trace(go.Scatter(x=sel["Fecha"], y=sel[metric], mode="markers", name="Fecha", marker=dict(size=12, color="#C62828", symbol="diamond")))
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title=f"{LABELS[metric]} · valor real, MA3 y baseline", height=300, margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1936,6 +2104,13 @@ def plot_metric_pct(player_df, metric, selected_date):
     fig.add_hrect(y0=-5, y1=-2.5, fillcolor="rgba(227,160,8,0.12)", line_width=0)
     fig.add_hrect(y0=-10, y1=-5, fillcolor="rgba(249,115,22,0.12)", line_width=0)
     fig.add_hrect(y0=-30, y1=-10, fillcolor="rgba(198,40,40,0.10)", line_width=0)
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title=f"{LABELS[metric]} · % vs baseline", height=300, margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1948,6 +2123,13 @@ def plot_objective_timeline(player_df, selected_date):
     sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
     if not sel.empty:
         fig.add_trace(go.Scatter(x=sel["Fecha"], y=sel["objective_loss_score"], mode="markers", marker=dict(size=12, color="#111827", symbol="diamond"), name="Fecha"), secondary_y=False)
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title="Timeline combinado: loss + readiness + z-score", height=340, margin=dict(l=10,r=10,t=35,b=10))
     fig.update_yaxes(title_text="Loss / Z", secondary_y=False)
     fig.update_yaxes(title_text="Readiness", secondary_y=True)
@@ -1959,6 +2141,13 @@ def plot_player_snapshot_compare(row):
     fig.add_trace(go.Bar(x=labels, y=[row.get(f"{m}_pct_vs_baseline", np.nan) for m in OBJECTIVE_METRICS], name="% vs baseline", marker_color="#1F4E79"))
     fig.add_trace(go.Bar(x=labels, y=[row.get(f"{m}_vs_team_pct", np.nan) for m in OBJECTIVE_METRICS], name="% vs equipo", marker_color="#0F766E"))
     fig.add_hline(y=-2.5, line_dash="dot"); fig.add_hline(y=-5, line_dash="dot"); fig.add_hline(y=-10, line_dash="dot")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(barmode="group", title="Snapshot de la sesión", height=320, margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1966,6 +2155,13 @@ def plot_team_heatmap(team_df):
     data = team_df.set_index("Jugador")[[f"{m}_pct_vs_baseline" for m in OBJECTIVE_METRICS]].copy()
     data.columns = [LABELS[m] for m in OBJECTIVE_METRICS]
     fig = px.imshow(data, color_continuous_scale=["#B91C1C","#F97316","#E3A008","#16A34A"], zmin=-15, zmax=5, text_auto=".1f", aspect="auto")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title="Heatmap del equipo · % vs línea base", height=max(340, len(data) * 35 + 100), margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
@@ -1978,6 +2174,13 @@ def plot_team_risk_distribution(team_df):
         temp, y="Estado", x="N", orientation="h", color="Estado",
         color_discrete_map=RISK_COLORS, title="Distribución del riesgo"
     )
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(
         height=330, margin=dict(l=40,r=20,t=70,b=30), showlegend=False, title_x=0.5
     )
@@ -1996,6 +2199,13 @@ def plot_team_objective_bar(team_df):
         hover_data=["objective_loss_mean_pct"]
     )
     fig.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(
         height=max(420, 24 * len(temp) + 160),
         margin=dict(l=90,r=30,t=70,b=30),
@@ -2032,6 +2242,13 @@ def plot_team_score_trend(df):
         secondary_y=True,
     )
 
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(
         title="Evolución global del grupo",
         height=340,
@@ -2047,6 +2264,13 @@ def plot_percentile_bars(row):
     temp = pd.DataFrame({"Métrica":[LABELS[m] for m in OBJECTIVE_METRICS], "Percentil histórico":[row.get(f"{m}_historical_percentile", np.nan) for m in OBJECTIVE_METRICS]})
     fig = px.bar(temp, x="Métrica", y="Percentil histórico", text="Percentil histórico", title="Percentil histórico individual")
     fig.update_traces(texttemplate="%{text:.0f}")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(height=280, margin=dict(l=10,r=10,t=35,b=10), showlegend=False)
     return fig
 
@@ -2063,6 +2287,13 @@ def plot_rank_vs_team(row):
     })
     fig = px.bar(temp, x="Métrica", y="Ranking sesión", text="Ranking sesión", title="Posición relativa en la sesión")
     fig.update_traces(texttemplate="%{text:.0f}")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(height=280, margin=dict(l=10,r=10,t=35,b=10), showlegend=False)
     return fig
 
@@ -2569,93 +2800,20 @@ def plot_session_candlestick(player_df, metric, selected_date):
     fig = go.Figure()
 
     if metric not in player_df.columns or post_col not in player_df.columns:
-        fig.update_layout(
-            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
-            height=320,
-            margin=dict(l=10, r=10, t=40, b=10),
-            xaxis_rangeslider_visible=False,
-        )
-        return fig
-
-    cols = ["Fecha", metric, post_col]
-    baseline_col = f"{metric}_baseline"
-    if baseline_col in player_df.columns:
-        cols.append(baseline_col)
-
-    temp = player_df[cols].copy()
-    temp = temp.dropna(subset=[metric, post_col], how="any")
-
-    if temp.empty:
-        fig.update_layout(
-            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
-            height=320,
-            margin=dict(l=10, r=10, t=40, b=10),
-            xaxis_rangeslider_visible=False,
-        )
-        return fig
-
-    temp["open"] = pd.to_numeric(temp[metric], errors="coerce")
-    temp["close"] = pd.to_numeric(temp[post_col], errors="coerce")
-    temp["high"] = temp[["open", "close"]].max(axis=1)
-    temp["low"] = temp[["open", "close"]].min(axis=1)
-    temp["x_label"] = temp["Fecha"].dt.strftime("%d-%m-%Y")
-
-    fig.add_trace(go.Candlestick(
-        x=temp["x_label"],
-        open=temp["open"],
-        high=temp["high"],
-        low=temp["low"],
-        close=temp["close"],
-        name="Sesión",
-        increasing_line_color="#16A34A",
-        decreasing_line_color="#DC2626",
-        increasing_fillcolor="rgba(22,163,74,0.35)",
-        decreasing_fillcolor="rgba(220,38,38,0.35)",
-        whiskerwidth=0.5,
-    ))
-
-    baseline_vals = pd.Series(dtype=float)
-    if baseline_col in temp.columns:
-        baseline_vals = pd.to_numeric(temp[baseline_col], errors="coerce")
-        if baseline_vals.notna().any():
-            fig.add_trace(go.Scatter(
-                x=temp["x_label"],
-                y=baseline_vals,
-                mode="lines+markers",
-                name="Baseline PRE",
-                line=dict(color="#111827", width=4, dash="dash"),
-                marker=dict(size=6, color="#111827"),
-            ))
-
-    sel = temp[temp["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
-    if not sel.empty:
-        fig.add_trace(go.Scatter(
-            x=[sel["x_label"].iloc[-1]],
-            y=[sel["high"].iloc[-1]],
-            mode="markers",
-            name="Fecha",
-            marker=dict(size=10, color="#1D4ED8", symbol="diamond")
-        ))
-
-    y_parts = [temp["open"], temp["close"], temp["high"], temp["low"]]
-    if baseline_vals.notna().any():
-        y_parts.append(baseline_vals)
-    y_values = pd.concat(y_parts).dropna()
-
-    if not y_values.empty:
-        y_min = float(y_values.min())
-        y_max = float(y_values.max())
-        margin = (y_max - y_min) * 0.35 if y_max != y_min else max(abs(y_max) * 0.05, 0.05)
-        fig.update_yaxes(range=[y_min - margin, y_max + margin])
+        # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
 
     fig.update_layout(
-        title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
-        height=340,
-        margin=dict(l=10, r=10, t=40, b=10),
-        xaxis_rangeslider_visible=False,
-        legend=dict(orientation="v"),
-    )
-    return fig
+            title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
+            height=320,
+            margin=dict(l=10, r=10, t=40, b=10),
+            xaxis_rangeslider_visible=False,
+        )
+        return fig
 
     cols = ["Fecha", metric, post_col]
     baseline_col = f"{metric}_baseline"
@@ -2666,7 +2824,14 @@ def plot_session_candlestick(player_df, metric, selected_date):
     temp = temp.dropna(subset=[metric, post_col], how="any")
 
     if temp.empty:
-        fig.update_layout(
+        # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
+    fig.update_layout(
             title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
             height=320,
             margin=dict(l=10, r=10, t=40, b=10),
@@ -2696,13 +2861,13 @@ def plot_session_candlestick(player_df, metric, selected_date):
     if baseline_col in temp.columns:
         baseline_vals = pd.to_numeric(temp[baseline_col], errors="coerce")
         if baseline_vals.notna().any():
-            fig.add_trace(go.Scatter(
-                x=temp["Fecha"],
-                y=baseline_vals,
-                mode="lines",
-                name="Baseline PRE",
-                line=dict(color="#0F766E", width=2, dash="dot")
-            ))
+            baseline_mean = baseline_vals.mean()
+            fig.add_hline(
+                y=baseline_mean,
+                line=dict(color="#0F172A", width=3, dash="dash"),
+                annotation_text="Baseline",
+                annotation_position="top left"
+            )
 
     sel = temp[temp["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
     if not sel.empty:
@@ -2713,6 +2878,13 @@ def plot_session_candlestick(player_df, metric, selected_date):
             name="Fecha",
             marker=dict(size=10, color="#1D4ED8", symbol="diamond")
         ))
+
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
 
     fig.update_layout(
         title=f"{LABELS.get(metric, metric)} · histórico sesión a sesión (PRE→POST)",
@@ -2815,6 +2987,13 @@ def page_comparador(metrics_df):
     fig.add_trace(go.Scatter(x=a["Fecha"], y=a[f"{metric}_pct_vs_baseline"], mode="lines+markers", name=p1))
     fig.add_trace(go.Scatter(x=b["Fecha"], y=b[f"{metric}_pct_vs_baseline"], mode="lines+markers", name=p2))
     fig.add_hline(y=-2.5, line_dash="dot"); fig.add_hline(y=-5, line_dash="dot"); fig.add_hline(y=-10, line_dash="dot")
+    # Ajuste dinámico del eje Y
+    y_values = pd.concat([temp["open"], temp["close"]])
+    y_min = y_values.min()
+    y_max = y_values.max()
+    margin = (y_max - y_min) * 0.3 if y_max != y_min else 0.05
+    fig.update_yaxes(range=[y_min - margin, y_max + margin])
+
     fig.update_layout(title=f"Comparación · {LABELS[metric]} (% vs línea base)", height=360)
     st.plotly_chart(fig, use_container_width=True)
 
