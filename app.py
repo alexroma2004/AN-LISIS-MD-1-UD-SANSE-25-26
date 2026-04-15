@@ -1577,6 +1577,117 @@ def progressive_ma3_by_cycle(group, metric):
 def compute_metrics(df):
     if df.empty:
         return df.copy()
+    sort_cols = ["Jugador", "Fecha"] + (["Microciclo"] if "Microciclo" in df.columns else [])
+    df = df.copy().sort_values(sort_cols).reset_index(drop=True)
+
+    # =========================
+    # MÉTRICAS 100% INDIVIDUALES
+    # =========================
+    for metric in ALL_METRICS:
+        df[f"{metric}_baseline"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_filtered_baseline(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+        df[f"{metric}_pct_vs_baseline"] = np.where(
+            df[f"{metric}_baseline"].notna() & (df[f"{metric}_baseline"] != 0),
+            (df[metric] - df[f"{metric}_baseline"]) / df[f"{metric}_baseline"] * 100,
+            np.nan,
+        )
+
+        df[f"{metric}_ma3"] = (
+            df.groupby("Jugador", group_keys=False)
+              .apply(lambda g: progressive_ma3_by_cycle(g, metric))
+              .reset_index(level=0, drop=True)
+        )
+
+    # Loss score y readiness SOLO desde la referencia individual
+    for metric in OBJECTIVE_METRICS:
+        sev = df[f"{metric}_pct_vs_baseline"].apply(severity_from_pct)
+        df[f"{metric}_severity"] = sev.apply(lambda x: x[0])
+        df[f"{metric}_severity_points"] = sev.apply(lambda x: x[1])
+
+    df["n_leve"] = sum((df[f"{m}_severity"] == "Fatiga leve").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_mod"] = sum((df[f"{m}_severity"] == "Fatiga moderada").astype(int) for m in OBJECTIVE_METRICS)
+    df["n_crit"] = sum((df[f"{m}_severity"] == "Fatiga crítica").astype(int) for m in OBJECTIVE_METRICS)
+
+    df["objective_loss_score"] = df[[f"{m}_severity_points" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["objective_loss_mean_pct"] = df[[f"{m}_pct_vs_baseline" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+    df["risk_label"] = df.apply(
+        lambda r: classify_risk_from_counts(int(r["n_leve"]), int(r["n_mod"]), int(r["n_crit"])),
+        axis=1
+    )
+    df["readiness_score"] = np.clip(100 - (df["objective_loss_score"] / 3.0) * 100, 0, 100)
+
+    df["objective_loss_score_ma3"] = (
+        df.groupby("Jugador")["objective_loss_score"]
+          .transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+    )
+
+    trend_slopes = []
+    for _, g in df.groupby("Jugador"):
+        vals = g["objective_loss_score"].tolist()
+        local = []
+        for i in range(len(vals)):
+            local.append(slope_last_n(vals[: i + 1], n=3))
+        trend_slopes.extend(local)
+    df["objective_loss_slope_3"] = trend_slopes
+    df["trend_label"] = df["objective_loss_slope_3"].apply(trend_label_from_slope)
+
+    # =========================
+    # MÉTRICAS CONTEXTUALES (EQUIPO)
+    # =========================
+    team_stats = df.groupby("Fecha")[OBJECTIVE_METRICS].agg(["mean", "std"]).reset_index()
+    team_stats.columns = ["Fecha"] + [f"{m}_{stat}" for m, stat in team_stats.columns.tolist()[1:]]
+    df = df.merge(team_stats, on="Fecha", how="left")
+
+    for m in OBJECTIVE_METRICS:
+        mean_col = f"{m}_mean"
+        std_col = f"{m}_std"
+
+        df[f"{m}_team_mean"] = pd.to_numeric(df[mean_col], errors="coerce")
+        df[f"{m}_team_std"] = pd.to_numeric(df[std_col], errors="coerce").replace(0, np.nan)
+
+        df[f"{m}_vs_team_pct"] = np.where(
+            df[f"{m}_team_mean"].notna() & (df[f"{m}_team_mean"] != 0),
+            (df[m] - df[f"{m}_team_mean"]) / df[f"{m}_team_mean"] * 100,
+            np.nan,
+        )
+
+        # Z-score contextual respecto al equipo en esa fecha
+        df[f"{m}_z"] = np.where(
+            df[f"{m}_team_std"].notna(),
+            (df[m] - df[f"{m}_team_mean"]) / df[f"{m}_team_std"],
+            np.nan,
+        )
+
+        # Ranking contextual de la sesión
+        df[f"{m}_team_rank"] = df.groupby("Fecha")[m].rank(method="min", ascending=True)
+
+    df["objective_z_score"] = df[[f"{m}_z" for m in OBJECTIVE_METRICS]].mean(axis=1, skipna=True)
+
+    # Rankings de loss/readiness en la sesión (contextuales, pero valores base siguen siendo individuales)
+    for metric in ["objective_loss_score", "readiness_score"]:
+        asc = metric != "readiness_score"
+        df[f"{metric}_team_rank"] = df.groupby("Fecha")[metric].rank(method="min", ascending=asc)
+
+    perc = {m: [] for m in OBJECTIVE_METRICS}
+    for _, g in df.groupby("Jugador"):
+        g = g.sort_values("Fecha")
+        for _, r in g.iterrows():
+            hist = g[g["Fecha"] <= r["Fecha"]]
+            for m in OBJECTIVE_METRICS:
+                perc[m].append(historical_percentile(hist, r[m], m))
+    for m in OBJECTIVE_METRICS:
+        df[f"{m}_historical_percentile"] = perc[m]
+
+    # Limpieza de columnas auxiliares
+    drop_aux = [f"{m}_mean" for m in OBJECTIVE_METRICS] + [f"{m}_std" for m in OBJECTIVE_METRICS]
+    df = df.drop(columns=[c for c in drop_aux if c in df.columns])
+
+    df = compute_pre_post_fields(df)
+    return df.copy()
     sort_cols = ["Jugador","Fecha"] + (["Microciclo"] if "Microciclo" in df.columns else [])
     df = df.copy().sort_values(sort_cols).reset_index(drop=True)
 
