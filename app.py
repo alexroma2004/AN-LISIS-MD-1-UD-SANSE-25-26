@@ -2257,6 +2257,62 @@ def plot_team_objective_bar(team_df):
     fig.update_xaxes(automargin=True, title="objective_loss_score")
     return fig
 
+def plot_team_objective_bar_post(team_df):
+    temp = team_df.copy()
+
+    # Comparación POST respecto al baseline individual del jugador
+    temp["CMJ_post_pct_vs_baseline"] = np.where(
+        temp["CMJ_post"].notna() & temp["CMJ_baseline"].notna() & (temp["CMJ_baseline"] != 0),
+        (temp["CMJ_post"] - temp["CMJ_baseline"]) / temp["CMJ_baseline"] * 100,
+        np.nan,
+    ) if {"CMJ_post", "CMJ_baseline"}.issubset(temp.columns) else np.nan
+
+    temp["RSI_post_pct_vs_baseline"] = np.where(
+        temp["RSI_mod_post"].notna() & temp["RSI_mod_baseline"].notna() & (temp["RSI_mod_baseline"] != 0),
+        (temp["RSI_mod_post"] - temp["RSI_mod_baseline"]) / temp["RSI_mod_baseline"] * 100,
+        np.nan,
+    ) if {"RSI_mod_post", "RSI_mod_baseline"}.issubset(temp.columns) else np.nan
+
+    cmj_sev = temp["CMJ_post_pct_vs_baseline"].apply(severity_from_pct) if "CMJ_post_pct_vs_baseline" in temp.columns else pd.Series([(np.nan, np.nan)] * len(temp))
+    rsi_sev = temp["RSI_post_pct_vs_baseline"].apply(severity_from_pct) if "RSI_post_pct_vs_baseline" in temp.columns else pd.Series([(np.nan, np.nan)] * len(temp))
+
+    temp["CMJ_post_points"] = cmj_sev.apply(lambda x: x[1] if isinstance(x, tuple) else np.nan)
+    temp["RSI_post_points"] = rsi_sev.apply(lambda x: x[1] if isinstance(x, tuple) else np.nan)
+
+    temp["objective_loss_score_post"] = temp[["CMJ_post_points", "RSI_post_points"]].mean(axis=1, skipna=True)
+    temp["objective_loss_mean_pct_post"] = temp[["CMJ_post_pct_vs_baseline", "RSI_post_pct_vs_baseline"]].mean(axis=1, skipna=True)
+
+    temp["CMJ_post_severity"] = cmj_sev.apply(lambda x: x[0] if isinstance(x, tuple) else "Sin referencia")
+    temp["RSI_post_severity"] = rsi_sev.apply(lambda x: x[0] if isinstance(x, tuple) else "Sin referencia")
+    temp["n_leve_post"] = ((temp["CMJ_post_severity"] == "Fatiga leve").astype(int) + (temp["RSI_post_severity"] == "Fatiga leve").astype(int))
+    temp["n_mod_post"] = ((temp["CMJ_post_severity"] == "Fatiga moderada").astype(int) + (temp["RSI_post_severity"] == "Fatiga moderada").astype(int))
+    temp["n_crit_post"] = ((temp["CMJ_post_severity"] == "Fatiga crítica").astype(int) + (temp["RSI_post_severity"] == "Fatiga crítica").astype(int))
+    temp["risk_label_post"] = temp.apply(
+        lambda r: classify_risk_from_counts(int(r["n_leve_post"]), int(r["n_mod_post"]), int(r["n_crit_post"])),
+        axis=1
+    )
+
+    temp = temp[["Jugador", "objective_loss_score_post", "objective_loss_mean_pct_post", "risk_label_post"]].copy()
+    temp = temp.dropna(subset=["objective_loss_score_post"]).sort_values(
+        ["objective_loss_score_post", "objective_loss_mean_pct_post"], ascending=[True, True]
+    )
+
+    fig = px.bar(
+        temp, y="Jugador", x="objective_loss_score_post", orientation="h",
+        color="risk_label_post", color_discrete_map=RISK_COLORS,
+        text="objective_loss_score_post", title="Objective loss score POST por jugador",
+        hover_data=["objective_loss_mean_pct_post"]
+    )
+    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
+    fig.update_layout(
+        height=max(420, 24 * len(temp) + 160),
+        margin=dict(l=90,r=30,t=70,b=30),
+        showlegend=False, title_x=0.5
+    )
+    fig.update_yaxes(automargin=True, title="")
+    fig.update_xaxes(automargin=True, title="objective_loss_score_post")
+    return fig
+
 def plot_team_score_trend(df):
     temp = df.groupby("Fecha").agg(
         objective_loss_score=("objective_loss_score", "mean"),
@@ -2685,6 +2741,9 @@ def page_equipo(metrics_df):
     c,d = st.columns(2)
     with c: st.plotly_chart(plot_team_heatmap(team_day), use_container_width=True)
     with d: st.plotly_chart(plot_team_objective_bar(team_day), use_container_width=True)
+
+    st.markdown("### Estado del equipo al terminar la sesión")
+    st.plotly_chart(plot_team_objective_bar_post(team_day), use_container_width=True)
 
     st.markdown("### Respuesta intra-sesión · PRE vs POST")
     p1,p2,p3,p4 = st.columns(4)
