@@ -2739,8 +2739,18 @@ def page_equipo(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Monitorización neuromuscular MD-1</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">Equipo</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Lectura global del estado del grupo en MD-1.</div></div>', unsafe_allow_html=True)
 
+    metrics_df = metrics_df.copy()
+    if "Microciclo" in metrics_df.columns:
+        metrics_df["Microciclo"] = (
+            metrics_df["Microciclo"]
+            .fillna("MD-1")
+            .astype(str)
+            .str.strip()
+            .replace({"NA": "MD-1", "N/A": "MD-1", "None": "MD-1", "NONE": "MD-1", "": "MD-1"})
+        )
+
     sessions = (
-        metrics_df[["Fecha", "Microciclo"]].assign(Microciclo=lambda d: d["Microciclo"].fillna("MD-1").replace({"NA":"MD-1","N/A":"MD-1"}))
+        metrics_df[["Fecha", "Microciclo"]]
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
@@ -2796,7 +2806,6 @@ def page_equipo(metrics_df):
     for col in ["CMJ %","RSI mod %","VMP %","CMJ Δ post-pre %","RSI Δ post-pre %","Pérdida media %","Loss score","Z-score objetivo","Readiness"]:
         table[col] = table[col].round(2)
     st.dataframe(table.sort_values(["Loss score","Pérdida media %"], ascending=[False, True]), use_container_width=True, hide_index=True)
-
 
 def player_results_reference(player_df, metric):
     vals = pd.to_numeric(player_df[metric], errors="coerce").dropna()
@@ -3327,9 +3336,12 @@ def page_informes(metrics_df):
         st.download_button("Descargar HTML entrenador", data=html.encode("utf-8"), file_name=f"informe_equipo_md1_{sel_date}.html", mime="text/html")
         st.download_button("Descargar PDF entrenador", data=build_pdf_bytes_team_session(team_day, sel_date), file_name=f"informe_equipo_md1_{sel_date}.pdf", mime="application/pdf")
 
-def delete_session_by_date(date_str):
+def delete_session_by_date(date_str, micro=None):
     supabase = get_supabase()
-    supabase.table("monitoring").delete().eq("Fecha", date_str).execute()
+    q = supabase.table("monitoring").delete().eq("Fecha", date_str)
+    if micro is not None and str(micro).strip() != "" and str(micro).strip().upper() not in ["NA", "N/A", "NONE"]:
+        q = q.eq("Microciclo", micro)
+    q.execute()
 
 
 def page_admin(base_df):
