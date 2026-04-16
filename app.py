@@ -2221,6 +2221,41 @@ def plot_team_heatmap(team_df):
     fig.update_layout(title="Heatmap del equipo · % vs línea base", height=max(340, len(data) * 35 + 100), margin=dict(l=10,r=10,t=35,b=10))
     return fig
 
+def plot_team_heatmap_post(team_df):
+    temp = team_df.copy()
+
+    temp["CMJ_post_pct_vs_baseline"] = np.where(
+        temp["CMJ_post"].notna() & temp["CMJ_baseline"].notna() & (temp["CMJ_baseline"] != 0),
+        (temp["CMJ_post"] - temp["CMJ_baseline"]) / temp["CMJ_baseline"] * 100,
+        np.nan,
+    ) if {"CMJ_post", "CMJ_baseline"}.issubset(temp.columns) else np.nan
+
+    temp["RSI_mod_post_pct_vs_baseline"] = np.where(
+        temp["RSI_mod_post"].notna() & temp["RSI_mod_baseline"].notna() & (temp["RSI_mod_baseline"] != 0),
+        (temp["RSI_mod_post"] - temp["RSI_mod_baseline"]) / temp["RSI_mod_baseline"] * 100,
+        np.nan,
+    ) if {"RSI_mod_post", "RSI_mod_baseline"}.issubset(temp.columns) else np.nan
+
+    cols = []
+    labels = []
+    if "CMJ_post_pct_vs_baseline" in temp.columns:
+        cols.append("CMJ_post_pct_vs_baseline")
+        labels.append("CMJ")
+    if "RSI_mod_post_pct_vs_baseline" in temp.columns:
+        cols.append("RSI_mod_post_pct_vs_baseline")
+        labels.append("RSI mod")
+
+    if not cols:
+        fig = go.Figure()
+        fig.update_layout(title="Heatmap POST del equipo · % vs línea base", height=340, margin=dict(l=10,r=10,t=35,b=10))
+        return fig
+
+    data = temp.set_index("Jugador")[cols].copy()
+    data.columns = labels
+    fig = px.imshow(data, color_continuous_scale=["#B91C1C","#F97316","#E3A008","#16A34A"], zmin=-15, zmax=5, text_auto=".1f", aspect="auto")
+    fig.update_layout(title="Heatmap POST del equipo · % vs línea base", height=max(340, len(data) * 35 + 100), margin=dict(l=10,r=10,t=35,b=10))
+    return fig
+
 
 def plot_team_risk_distribution(team_df):
     temp = team_df["risk_label"].value_counts().reindex(RISK_ORDER, fill_value=0).reset_index()
@@ -2738,12 +2773,15 @@ def page_equipo(metrics_df):
     a,b = st.columns(2)
     with a: st.plotly_chart(plot_team_risk_distribution(team_day), use_container_width=True)
     with b: st.plotly_chart(plot_team_score_trend(metrics_df), use_container_width=True)
+    st.markdown("### Estado del equipo al empezar la sesión")
     c,d = st.columns(2)
     with c: st.plotly_chart(plot_team_heatmap(team_day), use_container_width=True)
     with d: st.plotly_chart(plot_team_objective_bar(team_day), use_container_width=True)
 
     st.markdown("### Estado del equipo al terminar la sesión")
-    st.plotly_chart(plot_team_objective_bar_post(team_day), use_container_width=True)
+    e,f = st.columns(2)
+    with e: st.plotly_chart(plot_team_heatmap_post(team_day), use_container_width=True)
+    with f: st.plotly_chart(plot_team_objective_bar_post(team_day), use_container_width=True)
 
     st.markdown("### Respuesta intra-sesión · PRE vs POST")
     p1,p2,p3,p4 = st.columns(4)
