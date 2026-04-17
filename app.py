@@ -1063,12 +1063,9 @@ def page_force_reactivity(metrics_df):
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Cómo leer el perfil</span></div>', unsafe_allow_html=True)
             st.markdown(
-                "- **Avión**: alto RSI mod y alta fuerza relativa.
-"
-                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.
-"
-                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.
-"
+                "- **Avión**: alto RSI mod y alta fuerza relativa.\n"
+                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.\n"
+                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.\n"
                 "- **Base por desarrollar**: margen claro en ambas dimensiones."
             )
 
