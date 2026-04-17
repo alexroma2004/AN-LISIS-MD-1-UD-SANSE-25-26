@@ -887,8 +887,18 @@ def page_force_reactivity(metrics_df):
 
     st.markdown('<div class="hero"><div style="font-size:0.92rem; opacity:0.9;">Perfil fuerza-reactividad</div><div style="font-size:2.05rem; font-weight:900; margin-top:0.15rem;">RSI mod vs 1RM relativa estimada</div><div style="font-size:1rem; opacity:0.92; margin-top:0.4rem;">Comparación de la reactividad y la fuerza relativa del equipo con perfiles por cuadrantes.</div></div>', unsafe_allow_html=True)
 
+    metrics_df = metrics_df.copy()
+    if "Microciclo" in metrics_df.columns:
+        metrics_df["Microciclo"] = (
+            metrics_df["Microciclo"]
+            .fillna("MD-1")
+            .astype(str)
+            .str.strip()
+            .replace({"NA": "MD-1", "N/A": "MD-1", "None": "MD-1", "NONE": "MD-1", "": "MD-1"})
+        )
+
     sessions = (
-        metrics_df[["Fecha", "Microciclo"]].assign(Microciclo=lambda d: d["Microciclo"].fillna("MD-1").replace({"NA":"MD-1","N/A":"MD-1"}))
+        metrics_df[["Fecha", "Microciclo"]]
         .dropna(subset=["Fecha"])
         .drop_duplicates()
         .sort_values(["Fecha", "Microciclo"])
@@ -913,6 +923,13 @@ def page_force_reactivity(metrics_df):
 
     fr_df, profiles_df, profiles_err, rsi_ref, rel_ref = build_force_reactivity_df(metrics_df, selected_date)
     if "Microciclo" in fr_df.columns:
+        fr_df["Microciclo"] = (
+            fr_df["Microciclo"]
+            .fillna("MD-1")
+            .astype(str)
+            .str.strip()
+            .replace({"NA": "MD-1", "N/A": "MD-1", "None": "MD-1", "NONE": "MD-1", "": "MD-1"})
+        )
         fr_df = fr_df[fr_df["Microciclo"] == selected_micro].copy()
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1046,9 +1063,12 @@ def page_force_reactivity(metrics_df):
 
             st.markdown('<div class="premium-heading"><span class="dot"></span><span>Cómo leer el perfil</span></div>', unsafe_allow_html=True)
             st.markdown(
-                "- **Avión**: alto RSI mod y alta fuerza relativa.\n"
-                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.\n"
-                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.\n"
+                "- **Avión**: alto RSI mod y alta fuerza relativa.
+"
+                "- **Tanque**: buena fuerza relativa, pero menor componente reactivo.
+"
+                "- **Elástico**: buena reactividad, pero menor base de fuerza relativa.
+"
                 "- **Base por desarrollar**: margen claro en ambas dimensiones."
             )
 
