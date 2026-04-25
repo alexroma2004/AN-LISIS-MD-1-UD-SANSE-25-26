@@ -2137,36 +2137,147 @@ def build_visual_baseline_series(player_df, metric):
     return pd.Series(out, index=player_df.index)
 
 
+
+def build_pre_post_visual_df(player_df, metric):
+    """
+    Construye una serie solo para visualización.
+    - CMJ y RSI_mod: muestra PRE y POST cuando existe post.
+    - Resto de métricas: mantiene un único punto por sesión.
+    - Baseline y MA3 se mantienen calculadas sobre PRE.
+    """
+    rows = []
+    dfv = player_df.copy().sort_values("Fecha").reset_index(drop=True)
+
+    baseline_series = build_visual_baseline_series(dfv, metric)
+    ma3_series = build_visual_ma3_series(dfv, metric)
+
+    for i, r in dfv.iterrows():
+        fecha = pd.to_datetime(r["Fecha"], errors="coerce")
+        if pd.isna(fecha):
+            continue
+
+        baseline_val = baseline_series.iloc[i] if i < len(baseline_series) else np.nan
+        ma3_val = ma3_series.iloc[i] if i < len(ma3_series) else np.nan
+        pre_val = pd.to_numeric(pd.Series([r.get(metric, np.nan)]), errors="coerce").iloc[0]
+
+        has_post = metric in ["CMJ", "RSI_mod"] and f"{metric}_post" in dfv.columns and pd.notna(r.get(f"{metric}_post", np.nan))
+        date_txt = fecha.strftime("%d-%m-%Y")
+
+        if has_post:
+            post_val = pd.to_numeric(pd.Series([r.get(f"{metric}_post", np.nan)]), errors="coerce").iloc[0]
+            rows.append({
+                "Fecha": fecha,
+                "x_label": f"{date_txt} PRE",
+                "Valor": pre_val,
+                "Baseline": baseline_val,
+                "MA3": ma3_val,
+                "Tipo": "PRE",
+            })
+            rows.append({
+                "Fecha": fecha,
+                "x_label": f"{date_txt} POST",
+                "Valor": post_val,
+                "Baseline": baseline_val,
+                "MA3": np.nan,
+                "Tipo": "POST",
+            })
+        else:
+            rows.append({
+                "Fecha": fecha,
+                "x_label": date_txt,
+                "Valor": pre_val,
+                "Baseline": baseline_val,
+                "MA3": ma3_val,
+                "Tipo": "UNICO",
+            })
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    out["Pct_vs_baseline"] = np.where(
+        out["Baseline"].notna() & (out["Baseline"] != 0),
+        (out["Valor"] - out["Baseline"]) / out["Baseline"] * 100,
+        np.nan,
+    )
+    return out
+
+
 def plot_metric_main(player_df, metric, selected_date):
     fig = go.Figure()
 
-    visual_real = pd.to_numeric(player_df[metric], errors="coerce")
-    visual_ma3 = build_visual_ma3_series(player_df, metric)
-    visual_baseline = build_visual_baseline_series(player_df, metric)
+    if metric in ["CMJ", "RSI_mod"]:
+        visual_df = build_pre_post_visual_df(player_df, metric)
 
-    fig.add_trace(go.Scatter(
-        x=player_df["Fecha"], y=visual_real,
-        mode="lines+markers", name="Valor real",
-        line=dict(color="#1F4E79", width=3)
-    ))
-    fig.add_trace(go.Scatter(
-        x=player_df["Fecha"], y=visual_ma3,
-        mode="lines", name="MA3",
-        line=dict(color="#64748B", width=3, dash="dash")
-    ))
-    fig.add_trace(go.Scatter(
-        x=player_df["Fecha"], y=visual_baseline,
-        mode="lines", name="Baseline",
-        line=dict(color="#0F766E", width=2, dash="dot")
-    ))
+        if visual_df.empty:
+            fig.update_layout(
+                title=f"{LABELS[metric]} · valor real, MA3 y baseline",
+                height=300,
+                margin=dict(l=10, r=10, t=35, b=10)
+            )
+            return fig
 
-    sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
-    if not sel.empty:
         fig.add_trace(go.Scatter(
-            x=sel["Fecha"], y=sel[metric],
-            mode="markers", name="Fecha",
-            marker=dict(size=12, color="#C62828", symbol="diamond")
+            x=visual_df["x_label"], y=visual_df["Valor"],
+            mode="lines+markers", name="Valor real",
+            line=dict(color="#1F4E79", width=3),
+            marker=dict(
+                size=9,
+                color=np.where(visual_df["Tipo"].eq("POST"), "#16A34A", "#1F4E79"),
+                symbol=np.where(visual_df["Tipo"].eq("POST"), "diamond", "circle"),
+            ),
+            customdata=visual_df[["Tipo"]],
+            hovertemplate="<b>%{x}</b><br>Tipo: %{customdata[0]}<br>Valor: %{y:.3f}<extra></extra>"
         ))
+
+        fig.add_trace(go.Scatter(
+            x=visual_df["x_label"], y=visual_df["MA3"],
+            mode="lines", name="MA3",
+            line=dict(color="#64748B", width=3, dash="dash"),
+            connectgaps=False
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=visual_df["x_label"], y=visual_df["Baseline"],
+            mode="lines", name="Baseline",
+            line=dict(color="#0F766E", width=2, dash="dot")
+        ))
+
+        selected_mask = visual_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()
+        sel = visual_df[selected_mask]
+        if not sel.empty:
+            fig.add_trace(go.Scatter(
+                x=sel["x_label"], y=sel["Valor"],
+                mode="markers", name="Fecha",
+                marker=dict(size=12, color="#C62828", symbol="diamond")
+            ))
+    else:
+        visual_real = pd.to_numeric(player_df[metric], errors="coerce")
+        visual_ma3 = build_visual_ma3_series(player_df, metric)
+        visual_baseline = build_visual_baseline_series(player_df, metric)
+
+        fig.add_trace(go.Scatter(
+            x=player_df["Fecha"], y=visual_real,
+            mode="lines+markers", name="Valor real",
+            line=dict(color="#1F4E79", width=3)
+        ))
+        fig.add_trace(go.Scatter(
+            x=player_df["Fecha"], y=visual_ma3,
+            mode="lines", name="MA3",
+            line=dict(color="#64748B", width=3, dash="dash")
+        ))
+        fig.add_trace(go.Scatter(
+            x=player_df["Fecha"], y=visual_baseline,
+            mode="lines", name="Baseline",
+            line=dict(color="#0F766E", width=2, dash="dot")
+        ))
+
+        sel = player_df[player_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+        if not sel.empty:
+            fig.add_trace(go.Scatter(
+                x=sel["Fecha"], y=sel[metric],
+                mode="markers", name="Fecha",
+                marker=dict(size=12, color="#C62828", symbol="diamond")
+            ))
 
     fig.update_layout(
         title=f"{LABELS[metric]} · valor real, MA3 y baseline",
@@ -2177,26 +2288,60 @@ def plot_metric_main(player_df, metric, selected_date):
 
 def plot_metric_pct(player_df, metric, selected_date):
     fig = go.Figure()
-    local_df = player_df.copy().sort_values("Fecha").reset_index(drop=True)
-    local_df[f"{metric}_baseline_vis"] = progressive_filtered_baseline(local_df, metric)
-    local_df[f"{metric}_pct_vs_baseline_vis"] = np.where(
-        local_df[f"{metric}_baseline_vis"].notna() & (local_df[f"{metric}_baseline_vis"] != 0),
-        (pd.to_numeric(local_df[metric], errors="coerce") - local_df[f"{metric}_baseline_vis"]) / local_df[f"{metric}_baseline_vis"] * 100,
-        np.nan,
-    )
 
-    fig.add_trace(go.Scatter(
-        x=local_df["Fecha"], y=local_df[f"{metric}_pct_vs_baseline_vis"],
-        mode="lines+markers", name="% vs baseline",
-        line=dict(color="#1F4E79", width=3)
-    ))
-    sel = local_df[local_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
-    if not sel.empty:
+    if metric in ["CMJ", "RSI_mod"]:
+        local_df = build_pre_post_visual_df(player_df, metric)
+
+        if local_df.empty:
+            fig.update_layout(
+                title=f"{LABELS[metric]} · % vs baseline",
+                height=300, margin=dict(l=10,r=10,t=35,b=10)
+            )
+            return fig
+
         fig.add_trace(go.Scatter(
-            x=sel["Fecha"], y=sel[f"{metric}_pct_vs_baseline_vis"],
-            mode="markers", name="Fecha",
-            marker=dict(size=12, color="#C62828", symbol="diamond")
+            x=local_df["x_label"], y=local_df["Pct_vs_baseline"],
+            mode="lines+markers", name="% vs baseline",
+            line=dict(color="#1F4E79", width=3),
+            marker=dict(
+                size=9,
+                color=np.where(local_df["Tipo"].eq("POST"), "#16A34A", "#1F4E79"),
+                symbol=np.where(local_df["Tipo"].eq("POST"), "diamond", "circle"),
+            ),
+            customdata=local_df[["Tipo"]],
+            hovertemplate="<b>%{x}</b><br>Tipo: %{customdata[0]}<br>% vs baseline: %{y:.1f}%<extra></extra>"
         ))
+
+        selected_mask = local_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()
+        sel = local_df[selected_mask]
+        if not sel.empty:
+            fig.add_trace(go.Scatter(
+                x=sel["x_label"], y=sel["Pct_vs_baseline"],
+                mode="markers", name="Fecha",
+                marker=dict(size=12, color="#C62828", symbol="diamond")
+            ))
+    else:
+        local_df = player_df.copy().sort_values("Fecha").reset_index(drop=True)
+        local_df[f"{metric}_baseline_vis"] = progressive_filtered_baseline(local_df, metric)
+        local_df[f"{metric}_pct_vs_baseline_vis"] = np.where(
+            local_df[f"{metric}_baseline_vis"].notna() & (local_df[f"{metric}_baseline_vis"] != 0),
+            (pd.to_numeric(local_df[metric], errors="coerce") - local_df[f"{metric}_baseline_vis"]) / local_df[f"{metric}_baseline_vis"] * 100,
+            np.nan,
+        )
+
+        fig.add_trace(go.Scatter(
+            x=local_df["Fecha"], y=local_df[f"{metric}_pct_vs_baseline_vis"],
+            mode="lines+markers", name="% vs baseline",
+            line=dict(color="#1F4E79", width=3)
+        ))
+        sel = local_df[local_df["Fecha"].dt.normalize() == pd.to_datetime(selected_date).normalize()]
+        if not sel.empty:
+            fig.add_trace(go.Scatter(
+                x=sel["Fecha"], y=sel[f"{metric}_pct_vs_baseline_vis"],
+                mode="markers", name="Fecha",
+                marker=dict(size=12, color="#C62828", symbol="diamond")
+            ))
+
     fig.add_hline(y=0, line_dash="dot")
     fig.add_hrect(y0=-2.5, y1=15, fillcolor="rgba(46,139,87,0.10)", line_width=0)
     fig.add_hrect(y0=-5, y1=-2.5, fillcolor="rgba(227,160,8,0.12)", line_width=0)
